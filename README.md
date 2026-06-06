@@ -28,14 +28,15 @@ This Terraform module deploys a multi-agent system using Amazon Bedrock AgentCor
 
 ## Overview
 
-This pattern demonstrates deploying a multi-agent system with two coordinating agents that communicate via the Agent-to-Agent (A2A) protocol. Agent1 (Orchestrator) can delegate specialized tasks to Agent2 (Specialist), enabling modular and scalable agent architectures.
+This pattern demonstrates deploying a multi-agent system with three coordinating agents that communicate via the Agent-to-Agent (A2A) protocol. The Orchestrator routes requests to either the Specialist (for detailed analysis) or the Fact Checker (for claim verification), enabling modular and scalable agent architectures with full distributed tracing.
 
 **Key Features:**
-- Two-agent architecture with A2A communication
+- Three-agent architecture with multi-hop A2A communication
+- ADOT (AWS Distro for OpenTelemetry) instrumentation for full distributed tracing
 - Automated Docker image building via CodeBuild
 - S3-based source code management with change detection
 - IAM-based security with least-privilege access
-- Sequential deployment ensuring proper dependencies
+- Windows (PowerShell) and Linux/macOS compatible deployment
 
 This makes it ideal for:
 - Building complex multi-agent workflows
@@ -49,45 +50,54 @@ This makes it ideal for:
 
 ### System Components
 
-**Agent1 (Orchestrator Agent)**
+**Orchestrator Agent**
 - Receives initial user requests
-- Orchestrates workflow between multiple agents
-- Contains a specialized tool (`call_specialist_agent`) to invoke Agent2
-- Has IAM permissions to invoke Agent2's runtime
-- Environment variable `AGENT2_ARN` enables A2A communication
+- Routes to appropriate specialist agent(s) based on query type
+- Contains tools: `call_specialist_agent` and `call_factchecker_agent`
+- Has IAM permissions to invoke both downstream agents
+- Can invoke multiple agents in a single request for complex queries
 
-**Agent2 (Specialist Agent)**
-- Independent specialist agent with domain-specific capabilities
-- Provides data analysis and processing functions
-- Can be invoked by Agent1 via A2A protocol
-- No dependencies on other agents
+**Specialist Agent**
+- Independent agent for detailed analysis and research
+- Provides comprehensive explanations and data processing
+- Invoked by Orchestrator for complex analytical tasks
+
+**Fact Checker Agent**
+- Independent agent for claim verification
+- Returns structured verdicts (TRUE/FALSE/PARTIALLY TRUE) with confidence levels
+- Invoked by Orchestrator when factual accuracy needs verification
 
 ### Agent-to-Agent (A2A) Communication
 
 The A2A communication pattern enables:
-- **Orchestration**: Agent1 coordinates complex workflows
-- **Specialization**: Agent2 focuses on specific capabilities
+- **Orchestration**: Orchestrator coordinates complex workflows across multiple agents
+- **Specialization**: Each downstream agent focuses on specific capabilities
+- **Multi-hop routing**: Single request can trigger calls to multiple agents
 - **Scalability**: Easy to add more specialized agents
 - **Security**: IAM-based authorization between agents
+- **Observability**: Full distributed tracing across all agent hops via ADOT
 
 ## What's Included
 
 This Terraform configuration creates:
 
-- **2 S3 Buckets**: Source code storage for both agents with versioning
-- **2 ECR Repositories**: Container registries for ARM64 Docker images
-- **2 CodeBuild Projects**: Automated image building and pushing
-- **3 IAM Roles**: 
-  - Agent1 execution role (with A2A permissions)
-  - Agent2 execution role (standard permissions)
+- **3 S3 Buckets**: Source code storage for all agents with versioning
+- **3 ECR Repositories**: Container registries for ARM64 Docker images
+- **3 CodeBuild Projects**: Automated image building and pushing
+- **4 IAM Roles**: 
+  - Orchestrator execution role (with A2A permissions to invoke both agents)
+  - Specialist execution role (standard permissions)
+  - Fact Checker execution role (standard permissions)
   - CodeBuild service role
-- **2 Agent Runtimes**: 
-  - Agent1 (Orchestrator) with AGENT2_ARN environment variable
-  - Agent2 (Specialist) independent runtime
+- **3 Agent Runtimes**: 
+  - Orchestrator with `SPECIALIST_ARN` and `FACTCHECKER_ARN` environment variables
+  - Specialist (independent runtime)
+  - Fact Checker (independent runtime)
+- **ADOT Observability**: OpenTelemetry auto-instrumentation with Strands GenAI spans
 - **Build Automation**: Automatic rebuild on code changes (MD5-based detection)
 - **Supporting Resources**: S3 lifecycle policies, ECR lifecycle policies, IAM policies
 
-**Total:** ~30 AWS resources deployed and managed by Terraform
+**Total:** ~45 AWS resources deployed and managed by Terraform
 
 ## Prerequisites
 
@@ -136,9 +146,11 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars` with your preferred values:
 - `orchestrator_name`: Name for the orchestrator agent (default: "OrchestratorAgent")
 - `specialist_name`: Name for the specialist agent (default: "SpecialistAgent")
+- `factchecker_name`: Name for the fact checker agent (default: "FactCheckerAgent")
 - `stack_name`: Stack identifier (default: "agentcore-multi-agent")
-- `aws_region`: AWS region for deployment (default: "us-west-2")
+- `aws_region`: AWS region for deployment
 - `network_mode`: PUBLIC or PRIVATE networking
+- `bedrock_model_id`: Bedrock model inference profile ID
 
 ### 2. Initialize Terraform
 
@@ -266,34 +278,41 @@ python test_multi_agent.py $ORCHESTRATOR_ARN $SPECIALIST_ARN
 
 ### Test Scenarios
 
-The script runs two tests:
-1. **Simple Query**: Basic orchestrator invocation
-2. **A2A Communication**: Orchestrator delegates to specialist via A2A protocol
+The script runs four tests:
+1. **Simple Query**: Basic orchestrator invocation (no A2A)
+2. **Specialist A2A**: Orchestrator delegates to Specialist agent
+3. **Fact Checker A2A**: Orchestrator delegates to Fact Checker agent
+4. **Multi-Agent A2A**: Orchestrator calls BOTH Specialist and Fact Checker in one request
 
 ### Expected Output
 
 ```
 TEST 1: Simple Query (Orchestrator) ✅
-TEST 2: Complex Query with A2A Communication ✅
+TEST 2: Complex Query with A2A Communication (Specialist) ✅
+TEST 3: Fact Check Query (Fact Checker Agent) ✅
+TEST 4: Multi-Agent Query (Both Specialist AND Fact Checker) ✅
 
 ✅ ALL TESTS PASSED
 ```
 
 ## Agent Capabilities
 
-### Agent1 (Orchestrator)
+### Orchestrator Agent
 
 **Tools:**
-- `call_specialist_agent`: Invokes Agent2 for specialized processing
+- `call_specialist_agent`: Invokes Specialist for detailed analysis
   - Parameters: `query` (string)
-  - Returns: Processed results from Agent2
+  - Returns: Detailed analysis from Specialist
+- `call_factchecker_agent`: Invokes Fact Checker for claim verification
+  - Parameters: `claim` (string)
+  - Returns: Verdict with confidence level
 
 **Use Cases:**
-- Complex workflow orchestration
-- Multi-step data processing
-- Delegation to specialized agents
+- Complex workflow orchestration across multiple agents
+- Multi-step processing (analyze then verify)
+- Intelligent routing based on query type
 
-### Agent2 (Specialist)
+### Specialist Agent
 
 **Capabilities:**
 - Domain-specific data analysis
@@ -303,7 +322,19 @@ TEST 2: Complex Query with A2A Communication ✅
 **Use Cases:**
 - Data analysis and transformation
 - Domain-specific processing
-- Specialized computations
+- Comprehensive explanations
+
+### Fact Checker Agent
+
+**Capabilities:**
+- Claim evaluation and verification
+- Structured verdict responses (TRUE/FALSE/PARTIALLY TRUE/UNVERIFIABLE)
+- Confidence assessment (HIGH/MEDIUM/LOW)
+
+**Use Cases:**
+- Verifying factual claims
+- Assessing accuracy of statements
+- Providing evidence-based verdicts
 
 ## Customization
 
@@ -351,16 +382,24 @@ Requires VPC configuration (not included in this module).
 ```
 multi-agent-runtime/
 ├── agent-orchestrator-code/           # Orchestrator agent source code
-│   ├── agent.py                 # Main agent implementation
-│   ├── Dockerfile               # Container definition
+│   ├── agent.py                 # Main agent implementation (A2A routing)
+│   ├── Dockerfile               # Container definition with ADOT
 │   └── requirements.txt         # Python dependencies
 ├── agent-specialist-code/             # Specialist agent source code
 │   ├── agent.py                 # Main agent implementation
-│   ├── Dockerfile               # Container definition
+│   ├── Dockerfile               # Container definition with ADOT
 │   └── requirements.txt         # Python dependencies
+├── agent-factchecker-code/            # Fact Checker agent source code
+│   ├── agent.py                 # Main agent implementation
+│   ├── Dockerfile               # Container definition with ADOT
+│   └── requirements.txt         # Python dependencies
+├── scripts/
+│   ├── build-image.ps1          # PowerShell build script (Windows)
+│   └── build-image.sh           # Bash build script (Linux/macOS)
 ├── orchestrator.tf              # Orchestrator runtime configuration
 ├── specialist.tf                # Specialist runtime configuration
-├── main.tf                      # Main Terraform configuration
+├── factchecker.tf               # Fact Checker runtime configuration
+├── main.tf                      # Main Terraform configuration & build triggers
 ├── variables.tf                 # Input variables
 ├── outputs.tf                   # Output definitions
 ├── iam.tf                       # IAM roles and policies
@@ -370,6 +409,7 @@ multi-agent-runtime/
 ├── versions.tf                  # Terraform and provider versions
 ├── buildspec-orchestrator.yml   # Orchestrator build specification
 ├── buildspec-specialist.yml     # Specialist build specification
+├── buildspec-factchecker.yml    # Fact Checker build specification
 ├── terraform.tfvars.example     # Example variable values
 ├── backend.tf.example           # Example backend configuration
 ├── deploy.sh                    # Deployment automation script
@@ -380,47 +420,82 @@ multi-agent-runtime/
 
 ## Monitoring and Observability
 
+This project includes full distributed tracing via ADOT (AWS Distro for OpenTelemetry).
+
+### Distributed Tracing (ADOT)
+
+All agents are auto-instrumented with OpenTelemetry. Traces flow to the `aws/spans` CloudWatch log group and include:
+
+- **Agent spans**: Full invocation lifecycle per agent
+- **LLM call spans**: Model ID, token usage (input/output), time-to-first-token
+- **Tool use spans**: Which tools were called, duration, success/failure
+- **A2A spans**: Cross-agent invocations with target ARN, latency, HTTP status
+- **Session correlation**: All spans in a single request share a trace ID
+
+**View traces in CloudWatch Logs Insights** (log group: `aws/spans`):
+```
+fields @timestamp, name, attributes.`gen_ai.tool.name`, durationNano / 1000000 as duration_ms
+| filter name like /call_specialist|call_factchecker|InvokeAgentRuntime/
+| sort @timestamp desc
+| limit 50
+```
+
+**View in GenAI Observability dashboard:**
+CloudWatch → Application Signals → Generative AI
+
+### Application Logs
+
+The Orchestrator emits structured A2A logs to its CloudWatch log group:
+```
+fields @timestamp, @message
+| filter @message like /A2A_CALL/
+| sort @timestamp desc
+```
+
 ### CloudWatch Logs
 
 ```bash
 # Orchestrator logs
-aws logs tail /aws/bedrock-agentcore/agentcore-multi-agent-orchestrator-runtime --follow
+aws logs tail /aws/bedrock-agentcore/runtimes/agentcore_multi_agent_OrchestratorAgent-<id>-DEFAULT --follow
 
 # Specialist logs
-aws logs tail /aws/bedrock-agentcore/agentcore-multi-agent-specialist-runtime --follow
+aws logs tail /aws/bedrock-agentcore/runtimes/agentcore_multi_agent_SpecialistAgent-<id>-DEFAULT --follow
+
+# Fact Checker logs
+aws logs tail /aws/bedrock-agentcore/runtimes/agentcore_multi_agent_FactCheckerAgent-<id>-DEFAULT --follow
 ```
-
-### Metrics
-
-Access metrics in CloudWatch:
-- Agent invocation count
-- Agent execution duration
-- Error rates
-- A2A call metrics
 
 ### AWS Console
 
 Monitor in AWS Console:
-- **Bedrock AgentCore**: [Console Link](https://console.aws.amazon.com/bedrock/home#/agentcore)
+- **Bedrock AgentCore**: [Console Link](https://console.aws.amazon.com/bedrock-agentcore/agents)
+- **CloudWatch GenAI Observability**: Distributed trace visualization
 - **ECR Repositories**: View Docker images
 - **CodeBuild**: Monitor build status
-- **CloudWatch**: View logs and metrics
 
 ## Security
 
 ### IAM Permissions
 
-**Agent1 Execution Role:**
+**Orchestrator Execution Role:**
 - Standard AgentCore permissions
-- **Critical**: `bedrock-agentcore:InvokeAgentRuntime` for Agent2
+- **Critical**: `bedrock-agentcore:InvokeAgentRuntime` for both Specialist and Fact Checker
+- Bedrock model invocation (Converse/ConverseStream)
+- AWS Marketplace permissions for model subscription
 
-**Agent2 Execution Role:**
-- Standard AgentCore permissions only
+**Specialist Execution Role:**
+- Standard AgentCore permissions
+- Bedrock model invocation
+- No cross-agent invocation permissions needed
+
+**Fact Checker Execution Role:**
+- Standard AgentCore permissions
+- Bedrock model invocation
 - No cross-agent invocation permissions needed
 
 **CodeBuild Role:**
-- S3 access to both agent source buckets
-- ECR push access to both repositories
+- S3 access to all three agent source buckets
+- ECR push access to all three repositories
 - CloudWatch Logs write access
 
 ### Network Security
