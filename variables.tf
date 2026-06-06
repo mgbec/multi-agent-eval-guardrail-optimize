@@ -20,6 +20,17 @@ variable "specialist_name" {
   }
 }
 
+variable "factchecker_name" {
+  description = "Name for the fact checker agent runtime"
+  type        = string
+  default     = "FactCheckerAgent"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9_]{0,47}$", var.factchecker_name))
+    error_message = "Agent name must start with a letter, max 48 characters, alphanumeric and underscores only."
+  }
+}
+
 variable "network_mode" {
   description = "Network mode for AgentCore resources"
   type        = string

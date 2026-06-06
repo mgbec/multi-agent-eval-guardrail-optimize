@@ -107,3 +107,58 @@ resource "aws_s3_object" "specialist_source" {
     MD5   = data.archive_file.specialist_source.output_md5
   }
 }
+
+# ============================================================================
+# Fact Checker Agent Source
+# ============================================================================
+
+# Fact Checker Agent Source Bucket
+resource "aws_s3_bucket" "factchecker_source" {
+  bucket_prefix = "acma-fc-src-"
+  force_destroy = true
+
+  tags = {
+    Name    = "${var.stack_name}-factchecker-source"
+    Purpose = "Store Fact Checker agent source code for CodeBuild"
+  }
+}
+
+# Block public access - Fact Checker
+resource "aws_s3_bucket_public_access_block" "factchecker_source" {
+  bucket = aws_s3_bucket.factchecker_source.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Enable versioning - Fact Checker
+resource "aws_s3_bucket_versioning" "factchecker_source" {
+  bucket = aws_s3_bucket.factchecker_source.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Archive agent-factchecker-code/ directory
+data "archive_file" "factchecker_source" {
+  type        = "zip"
+  source_dir  = "${path.module}/agent-factchecker-code"
+  output_path = "${path.module}/.terraform/agent-factchecker-code.zip"
+}
+
+# Upload Fact Checker source to S3
+resource "aws_s3_object" "factchecker_source" {
+  bucket = aws_s3_bucket.factchecker_source.id
+  key    = "agent-factchecker-code-${data.archive_file.factchecker_source.output_md5}.zip"
+  source = data.archive_file.factchecker_source.output_path
+  etag   = data.archive_file.factchecker_source.output_md5
+
+  tags = {
+    Name  = "agent-factchecker-source-code"
+    Agent = "FactChecker"
+    MD5   = data.archive_file.factchecker_source.output_md5
+  }
+}

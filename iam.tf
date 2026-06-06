@@ -369,10 +369,11 @@ resource "aws_iam_role_policy" "codebuild" {
         Resource = [
           aws_ecr_repository.orchestrator.arn,
           aws_ecr_repository.specialist.arn,
+          aws_ecr_repository.factchecker.arn,
           "*"
         ]
       },
-      # S3 Source Access for both agent code buckets
+      # S3 Source Access for all agent code buckets
       {
         Sid    = "S3SourceAccess"
         Effect = "Allow"
@@ -382,7 +383,8 @@ resource "aws_iam_role_policy" "codebuild" {
         ]
         Resource = [
           "${aws_s3_bucket.orchestrator_source.arn}/*",
-          "${aws_s3_bucket.specialist_source.arn}/*"
+          "${aws_s3_bucket.specialist_source.arn}/*",
+          "${aws_s3_bucket.factchecker_source.arn}/*"
         ]
       },
       {
@@ -394,7 +396,150 @@ resource "aws_iam_role_policy" "codebuild" {
         ]
         Resource = [
           aws_s3_bucket.orchestrator_source.arn,
-          aws_s3_bucket.specialist_source.arn
+          aws_s3_bucket.specialist_source.arn,
+          aws_s3_bucket.factchecker_source.arn
+        ]
+      }
+    ]
+  })
+}
+
+# ============================================================================
+# Fact Checker Agent Execution Role - For AgentCore Runtime
+# ============================================================================
+
+resource "aws_iam_role" "factchecker_execution" {
+  name = "${var.stack_name}-factchecker-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "AssumeRolePolicy"
+      Effect = "Allow"
+      Principal = {
+        Service = "bedrock-agentcore.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.id
+        }
+        ArnLike = {
+          "aws:SourceArn" = "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.id}:*"
+        }
+      }
+    }]
+  })
+
+  tags = {
+    Name   = "${var.stack_name}-factchecker-execution-role"
+    Module = "IAM"
+    Agent  = "FactChecker"
+  }
+}
+
+# Attach AWS managed policy for AgentCore - Fact Checker
+resource "aws_iam_role_policy_attachment" "factchecker_execution_managed" {
+  role       = aws_iam_role.factchecker_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/BedrockAgentCoreFullAccess"
+}
+
+# Inline policy for fact checker execution
+resource "aws_iam_role_policy" "factchecker_execution" {
+  name = "FactCheckerCoreExecutionPolicy"
+  role = aws_iam_role.factchecker_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # ECR Access for Fact Checker
+      {
+        Sid    = "ECRImageAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = aws_ecr_repository.factchecker.arn
+      },
+      {
+        Sid      = "ECRTokenAccess"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      # CloudWatch Logs
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogStreams",
+          "logs:CreateLogGroup",
+          "logs:DescribeLogGroups",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.id}:log-group:/aws/bedrock-agentcore/runtimes/*"
+      },
+      # X-Ray Tracing
+      {
+        Sid    = "XRayTracing"
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets"
+        ]
+        Resource = "*"
+      },
+      # CloudWatch Metrics
+      {
+        Sid      = "CloudWatchMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "bedrock-agentcore"
+          }
+        }
+      },
+      # Bedrock Model Invocation
+      {
+        Sid    = "BedrockModelInvocation"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:Converse",
+          "bedrock:ConverseStream"
+        ]
+        Resource = "*"
+      },
+      # AWS Marketplace (required for third-party model access verification)
+      {
+        Sid    = "MarketplaceModelAccess"
+        Effect = "Allow"
+        Action = [
+          "aws-marketplace:ViewSubscriptions",
+          "aws-marketplace:Subscribe"
+        ]
+        Resource = "*"
+      },
+      # Workload Access Tokens
+      {
+        Sid    = "GetAgentAccessToken"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+          "bedrock-agentcore:GetWorkloadAccessTokenForUserId"
+        ]
+        Resource = [
+          "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.id}:workload-identity-directory/default",
+          "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.id}:workload-identity-directory/default/workload-identity/*"
         ]
       }
     ]

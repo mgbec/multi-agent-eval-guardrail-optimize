@@ -22,6 +22,7 @@ resource "aws_bedrockagentcore_agent_runtime" "orchestrator" {
     AWS_REGION         = data.aws_region.current.region
     AWS_DEFAULT_REGION = data.aws_region.current.region
     SPECIALIST_ARN     = aws_bedrockagentcore_agent_runtime.specialist.agent_runtime_arn
+    FACTCHECKER_ARN    = aws_bedrockagentcore_agent_runtime.factchecker.agent_runtime_arn
     BEDROCK_MODEL_ID   = var.bedrock_model_id
   }
 
@@ -32,9 +33,10 @@ resource "aws_bedrockagentcore_agent_runtime" "orchestrator" {
     Agent       = "Orchestrator"
   }
 
-  # CRITICAL: Must wait for Specialist Agent to be created first
+  # CRITICAL: Must wait for Specialist and Fact Checker Agents to be created first
   depends_on = [
     aws_bedrockagentcore_agent_runtime.specialist,
+    aws_bedrockagentcore_agent_runtime.factchecker,
     null_resource.trigger_build_orchestrator,
     aws_iam_role_policy.orchestrator_execution,
     aws_iam_role_policy.orchestrator_invoke_specialist,

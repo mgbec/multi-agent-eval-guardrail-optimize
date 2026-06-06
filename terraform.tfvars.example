@@ -5,9 +5,10 @@
 # Example: cp terraform.tfvars.example terraform.tfvars
 
 # Agent Configuration
-orchestrator_name = "OrchestratorAgent"
-specialist_name   = "SpecialistAgent"
-stack_name        = "agentcore-multi-agent"
+orchestrator_name  = "OrchestratorAgent"
+specialist_name    = "SpecialistAgent"
+factchecker_name   = "FactCheckerAgent"
+stack_name         = "agentcore-multi-agent"
 
 # Network Configuration
 network_mode = "PUBLIC" # PUBLIC or PRIVATE

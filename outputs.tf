@@ -108,3 +108,47 @@ output "test_script_command" {
   description = "Command to test multi-agent communication"
   value       = "python test_multi_agent.py ${aws_bedrockagentcore_agent_runtime.orchestrator.agent_runtime_arn}"
 }
+
+# ============================================================================
+# Fact Checker Agent Outputs
+# ============================================================================
+
+output "factchecker_runtime_id" {
+  description = "ID of fact checker agent runtime"
+  value       = aws_bedrockagentcore_agent_runtime.factchecker.agent_runtime_id
+}
+
+output "factchecker_runtime_arn" {
+  description = "ARN of fact checker agent runtime"
+  value       = aws_bedrockagentcore_agent_runtime.factchecker.agent_runtime_arn
+}
+
+output "factchecker_runtime_version" {
+  description = "Version of fact checker agent runtime"
+  value       = aws_bedrockagentcore_agent_runtime.factchecker.agent_runtime_version
+}
+
+output "factchecker_ecr_repository_url" {
+  description = "URL of the ECR repository for fact checker agent"
+  value       = aws_ecr_repository.factchecker.repository_url
+}
+
+output "factchecker_execution_role_arn" {
+  description = "ARN of the fact checker agent execution role"
+  value       = aws_iam_role.factchecker_execution.arn
+}
+
+output "factchecker_codebuild_project_name" {
+  description = "Name of the CodeBuild project for fact checker agent"
+  value       = aws_codebuild_project.factchecker_image.name
+}
+
+output "factchecker_source_bucket_name" {
+  description = "S3 bucket containing fact checker agent source code"
+  value       = aws_s3_bucket.factchecker_source.id
+}
+
+output "factchecker_source_code_md5" {
+  description = "MD5 hash of fact checker source code (triggers rebuild when changed)"
+  value       = data.archive_file.factchecker_source.output_md5
+}

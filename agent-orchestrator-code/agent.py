@@ -27,25 +27,28 @@ SPECIALIST_ARN = os.getenv("SPECIALIST_ARN")
 if not SPECIALIST_ARN:
     raise EnvironmentError("SPECIALIST_ARN environment variable is required")
 
+# Environment variable for Fact Checker Agent ARN (required - set by Terraform)
+FACTCHECKER_ARN = os.getenv("FACTCHECKER_ARN")
+if not FACTCHECKER_ARN:
+    raise EnvironmentError("FACTCHECKER_ARN environment variable is required")
 
-def invoke_specialist(query: str) -> str:
-    """Helper function to invoke specialist agent using boto3"""
+
+def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
+    """Generic helper to invoke any agent runtime using boto3"""
     try:
-        # Get region from environment (set by AgentCore runtime)
         region = os.getenv("AWS_REGION")
         if not region:
             raise EnvironmentError("AWS_REGION environment variable is required")
         agentcore_client = boto3.client("bedrock-agentcore", region_name=region)
 
-        logger.info(f"A2A_CALL_START | target={SPECIALIST_ARN} | query_length={len(query)}")
-        logger.info(f"A2A_CALL_PAYLOAD | query={query[:500]}")
+        logger.info(f"A2A_CALL_START | target={agent_name} | arn={agent_arn} | query_length={len(query)}")
+        logger.info(f"A2A_CALL_PAYLOAD | agent={agent_name} | query={query[:500]}")
 
         import time
         start_time = time.time()
 
-        # Invoke specialist agent runtime (using AWS sample format)
         response = agentcore_client.invoke_agent_runtime(
-            agentRuntimeArn=SPECIALIST_ARN,
+            agentRuntimeArn=agent_arn,
             qualifier="DEFAULT",
             payload=json.dumps({"prompt": query}),
         )
@@ -56,13 +59,12 @@ def invoke_specialist(query: str) -> str:
             for line in response["response"].iter_lines(chunk_size=10):
                 if line:
                     line = line.decode("utf-8")
-                    # Remove 'data: ' prefix if present
                     if line.startswith("data: "):
                         line = line[6:]
                     result += line
             elapsed = (time.time() - start_time) * 1000
-            logger.info(f"A2A_CALL_END | latency_ms={elapsed:.0f} | response_length={len(result)}")
-            logger.info(f"A2A_CALL_RESPONSE | response={result[:500]}")
+            logger.info(f"A2A_CALL_END | agent={agent_name} | latency_ms={elapsed:.0f} | response_length={len(result)}")
+            logger.info(f"A2A_CALL_RESPONSE | agent={agent_name} | response={result[:500]}")
             return result
 
         # Handle JSON response
@@ -72,8 +74,8 @@ def invoke_specialist(query: str) -> str:
                 content.append(chunk.decode("utf-8"))
             response_data = json.loads("".join(content))
             elapsed = (time.time() - start_time) * 1000
-            logger.info(f"A2A_CALL_END | latency_ms={elapsed:.0f} | response_length={len(json.dumps(response_data))}")
-            logger.info(f"A2A_CALL_RESPONSE | response={json.dumps(response_data)[:500]}")
+            logger.info(f"A2A_CALL_END | agent={agent_name} | latency_ms={elapsed:.0f} | response_length={len(json.dumps(response_data))}")
+            logger.info(f"A2A_CALL_RESPONSE | agent={agent_name} | response={json.dumps(response_data)[:500]}")
             return json.dumps(response_data)
 
         # Handle other response types
@@ -81,23 +83,23 @@ def invoke_specialist(query: str) -> str:
             response_body = response["response"].read()
             elapsed = (time.time() - start_time) * 1000
             result = response_body.decode("utf-8")
-            logger.info(f"A2A_CALL_END | latency_ms={elapsed:.0f} | response_length={len(result)}")
-            logger.info(f"A2A_CALL_RESPONSE | response={result[:500]}")
+            logger.info(f"A2A_CALL_END | agent={agent_name} | latency_ms={elapsed:.0f} | response_length={len(result)}")
+            logger.info(f"A2A_CALL_RESPONSE | agent={agent_name} | response={result[:500]}")
             return result
 
     except Exception as e:
         import traceback
-        logger.error(f"A2A_CALL_ERROR | target={SPECIALIST_ARN} | error={str(e)}")
-
+        logger.error(f"A2A_CALL_ERROR | agent={agent_name} | arn={agent_arn} | error={str(e)}")
         error_details = traceback.format_exc()
-        return f"Error invoking specialist agent: {str(e)}\nDetails: {error_details}"
+        return f"Error invoking {agent_name}: {str(e)}\nDetails: {error_details}"
 
 
 @tool
 def call_specialist_agent(query: str) -> Dict[str, Any]:
     """
     Call the specialist agent for detailed analysis or complex tasks.
-    Use this tool when you need expert analysis or detailed information.
+    Use this tool when you need expert analysis, detailed explanations,
+    or in-depth information on a topic.
 
     Args:
         query: The question or task to send to the specialist agent
@@ -105,30 +107,50 @@ def call_specialist_agent(query: str) -> Dict[str, Any]:
     Returns:
         The specialist agent's response
     """
-    result = invoke_specialist(query)
+    result = invoke_agent_runtime(SPECIALIST_ARN, "specialist", query)
+    return {"status": "success", "content": [{"text": result}]}
+
+
+@tool
+def call_factchecker_agent(claim: str) -> Dict[str, Any]:
+    """
+    Call the fact checker agent to verify a claim or statement.
+    Use this tool when you need to verify facts, check accuracy of statements,
+    or assess the truthfulness of a claim.
+
+    Args:
+        claim: The statement or claim to fact-check
+
+    Returns:
+        The fact checker agent's verdict with confidence level
+    """
+    result = invoke_agent_runtime(FACTCHECKER_ARN, "factchecker", claim)
     return {"status": "success", "content": [{"text": result}]}
 
 
 def create_orchestrator_agent() -> Agent:
-    """Create the orchestrator agent with the tool to call specialist agent"""
-    system_prompt = """You are an orchestrator agent.
-    You can handle simple queries directly, but for complex analytical tasks,
-    you should delegate to the specialist agent using the call_specialist_agent tool.
+    """Create the orchestrator agent with tools to call specialist and fact checker"""
+    system_prompt = """You are an orchestrator agent that coordinates between specialized agents.
+    You have two tools available:
 
-    Use the specialist agent when:
-    - The query requires detailed analysis
-    - The query is about complex topics
-    - The user explicitly asks for expert analysis
+    1. call_specialist_agent - For detailed analysis, explanations, and complex research tasks
+    2. call_factchecker_agent - For verifying claims, checking facts, and assessing truthfulness
 
-    Handle simple queries (greetings, basic questions) yourself."""
+    Routing guidelines:
+    - For questions requiring detailed analysis or explanation → use call_specialist_agent
+    - For verifying specific claims or statements → use call_factchecker_agent
+    - For complex queries that involve both analysis AND fact verification → use BOTH tools
+      (first get the analysis from the specialist, then verify key claims with the fact checker)
+    - For simple greetings or basic questions → handle directly yourself
 
-    # Use explicit model to avoid subscription issues with cross-region profiles
+    When using both tools, synthesize their responses into a coherent answer."""
+
     model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
     model = BedrockModel(model_id=model_id)
 
     return Agent(
         model=model,
-        tools=[call_specialist_agent],
+        tools=[call_specialist_agent, call_factchecker_agent],
         system_prompt=system_prompt,
         name="OrchestratorAgent",
         tracer=tracer,

@@ -167,7 +167,7 @@ def test_multi_agent(orchestrator_arn, specialist_arn=None):
 
     # Test 2: Complex query triggering A2A communication
     print("\n" + "=" * 80)
-    print("TEST 2: Complex Query with A2A Communication")
+    print("TEST 2: Complex Query with A2A Communication (Specialist)")
     print("=" * 80)
     result = test_agent(
         agentcore_client,
@@ -175,7 +175,31 @@ def test_multi_agent(orchestrator_arn, specialist_arn=None):
         "Orchestrator",
         "I need expert analysis. Please coordinate with the specialist agent to provide a comprehensive explanation of cloud computing architectures and best practices.",
     )
-    test_results.append(("A2A Communication Test", result))
+    test_results.append(("A2A Communication - Specialist", result))
+
+    # Test 3: Fact-checking query triggering Fact Checker agent
+    print("\n" + "=" * 80)
+    print("TEST 3: Fact Check Query (Fact Checker Agent)")
+    print("=" * 80)
+    result = test_agent(
+        agentcore_client,
+        orchestrator_arn,
+        "Orchestrator",
+        "Please fact-check this claim: 'Amazon S3 provides 99.999999999% (11 nines) durability for objects stored across multiple Availability Zones.'",
+    )
+    test_results.append(("A2A Communication - Fact Checker", result))
+
+    # Test 4: Multi-agent query triggering BOTH specialist and fact checker
+    print("\n" + "=" * 80)
+    print("TEST 4: Multi-Agent Query (Both Specialist AND Fact Checker)")
+    print("=" * 80)
+    result = test_agent(
+        agentcore_client,
+        orchestrator_arn,
+        "Orchestrator",
+        "I need you to do two things: First, get a detailed analysis from the specialist about how serverless computing works. Then, fact-check this claim: 'AWS Lambda functions can run for a maximum of 15 minutes.' Please use both agents.",
+    )
+    test_results.append(("A2A Multi-Agent Communication", result))
 
     # Summary
     print("\n" + "=" * 80)
