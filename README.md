@@ -260,21 +260,21 @@ pip install boto3  # Required for agent invocation
 ```bash
 # Get ARNs from Terraform
 ORCHESTRATOR_ARN=$(terraform output -raw orchestrator_runtime_arn)
-SPECIALIST_ARN=$(terraform output -raw specialist_runtime_arn)
 
-# Test both agents
-python test_multi_agent.py $ORCHESTRATOR_ARN $SPECIALIST_ARN
+# Test all agents (Orchestrator routes to Specialist and Fact Checker via A2A)
+python test_multi_agent.py $ORCHESTRATOR_ARN
 ```
 
 **Windows (PowerShell):**
 ```powershell
 # Get ARNs from Terraform
 $ORCHESTRATOR_ARN = terraform output -raw orchestrator_runtime_arn
-$SPECIALIST_ARN = terraform output -raw specialist_runtime_arn
 
-# Test both agents
-python test_multi_agent.py $ORCHESTRATOR_ARN $SPECIALIST_ARN
+# Test all agents (Orchestrator routes to Specialist and Fact Checker via A2A)
+python test_multi_agent.py $ORCHESTRATOR_ARN
 ```
+
+> **Note**: You only need the Orchestrator ARN. The test script exercises all three agents by sending queries that trigger A2A routing to both the Specialist and Fact Checker.
 
 ### Test Scenarios
 
@@ -613,11 +613,11 @@ For multi-region:
 
 1. **Test the deployment**
    ```bash
-   python test_multi_agent.py $(terraform output -raw orchestrator_runtime_arn) $(terraform output -raw specialist_runtime_arn)
+   python test_multi_agent.py $(terraform output -raw orchestrator_runtime_arn)
    ```
    On Windows (PowerShell):
    ```powershell
-   python test_multi_agent.py (terraform output -raw orchestrator_runtime_arn) (terraform output -raw specialist_runtime_arn)
+   python test_multi_agent.py (terraform output -raw orchestrator_runtime_arn)
    ```
 
 2. **Customize agents** for your specific use case
