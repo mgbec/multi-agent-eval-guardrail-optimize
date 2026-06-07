@@ -69,13 +69,24 @@ This makes it ideal for:
 
 ### Agent-to-Agent (A2A) Communication
 
-The A2A communication pattern enables:
-- **Orchestration**: Orchestrator coordinates complex workflows across multiple agents
-- **Specialization**: Each downstream agent focuses on specific capabilities
-- **Multi-hop routing**: Single request can trigger calls to multiple agents
-- **Scalability**: Easy to add more specialized agents
-- **Security**: IAM-based authorization between agents
-- **Observability**: Full distributed tracing across all agent hops via ADOT
+> **Note:** This project uses direct `InvokeAgentRuntime` API calls between agents — not the formal [A2A protocol](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) (Google's Agent-to-Agent spec with JSON-RPC, agent cards, and OAuth). See below for the distinction.
+
+**How it works here:** The Orchestrator's tool functions make boto3 `invoke_agent_runtime()` calls to reach the Specialist and Fact Checker. This is simple, direct, and secured via IAM — but it's not the open A2A protocol standard.
+
+**Formal A2A protocol (not used here):** Requires JSON-RPC on port 9000, agent card discovery, OAuth 2.0/SigV4 auth, and the full task lifecycle. This is designed for cross-organization interoperability where agents from different vendors need a standard contract.
+
+**Why we chose the direct approach:**
+- Simpler implementation (one boto3 call vs. full protocol stack)
+- Native IAM security without additional OAuth configuration
+- Built-in observability via CloudWatch and ADOT
+- Lower latency (no extra protocol negotiation hop)
+- Appropriate for internal multi-agent systems within the same AWS account
+
+**When you'd want the formal A2A protocol instead:**
+- Agents communicate across organizations or trust boundaries
+- Dynamic agent discovery is needed (vs. hardcoded ARNs)
+- Interoperability with non-AWS agents implementing the same spec
+- Building a marketplace where agents from different vendors interact
 
 ## What's Included
 
