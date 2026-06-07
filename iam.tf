@@ -104,7 +104,7 @@ resource "aws_iam_role_policy" "orchestrator_execution" {
           }
         }
       },
-      # Bedrock Model Invocation
+      # Bedrock Model Invocation (scoped to configured model)
       {
         Sid    = "BedrockModelInvocation"
         Effect = "Allow"
@@ -114,7 +114,10 @@ resource "aws_iam_role_policy" "orchestrator_execution" {
           "bedrock:Converse",
           "bedrock:ConverseStream"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:bedrock:*::inference-profile/${var.bedrock_model_id}",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+        ]
       },
       # AWS Marketplace (required for third-party model access verification)
       {
@@ -145,23 +148,26 @@ resource "aws_iam_role_policy" "orchestrator_execution" {
 }
 
 # ============================================================================
-# Orchestrator A2A Policy - Allows Orchestrator to Invoke Specialist
+# Orchestrator A2A Policy - Allows Orchestrator to Invoke Specialist and Fact Checker
 # ============================================================================
 
 resource "aws_iam_role_policy" "orchestrator_invoke_specialist" {
-  name = "OrchestratorInvokeSpecialistPolicy"
+  name = "OrchestratorInvokeAgentsPolicy"
   role = aws_iam_role.orchestrator_execution.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "InvokeSpecialistRuntime"
+        Sid    = "InvokeDownstreamAgents"
         Effect = "Allow"
         Action = [
           "bedrock-agentcore:InvokeAgentRuntime"
         ]
-        Resource = "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.id}:runtime/*"
+        Resource = [
+          aws_bedrockagentcore_agent_runtime.specialist.agent_runtime_arn,
+          aws_bedrockagentcore_agent_runtime.factchecker.agent_runtime_arn
+        ]
       }
     ]
   })
@@ -269,7 +275,7 @@ resource "aws_iam_role_policy" "specialist_execution" {
           }
         }
       },
-      # Bedrock Model Invocation
+      # Bedrock Model Invocation (scoped to configured model)
       {
         Sid    = "BedrockModelInvocation"
         Effect = "Allow"
@@ -279,7 +285,10 @@ resource "aws_iam_role_policy" "specialist_execution" {
           "bedrock:Converse",
           "bedrock:ConverseStream"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:bedrock:*::inference-profile/${var.bedrock_model_id}",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+        ]
       },
       # AWS Marketplace (required for third-party model access verification)
       {
@@ -506,7 +515,7 @@ resource "aws_iam_role_policy" "factchecker_execution" {
           }
         }
       },
-      # Bedrock Model Invocation
+      # Bedrock Model Invocation (scoped to configured model)
       {
         Sid    = "BedrockModelInvocation"
         Effect = "Allow"
@@ -516,7 +525,10 @@ resource "aws_iam_role_policy" "factchecker_execution" {
           "bedrock:Converse",
           "bedrock:ConverseStream"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:bedrock:*::inference-profile/${var.bedrock_model_id}",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+        ]
       },
       # AWS Marketplace (required for third-party model access verification)
       {
