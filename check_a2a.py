@@ -1,18 +1,40 @@
-"""Fetch and display A2A call logs from the Orchestrator agent."""
+"""Fetch and display A2A call logs from the Orchestrator agent.
+
+Usage:
+    python check_a2a.py              # Last 7 days (default)
+    python check_a2a.py --hours 1    # Last 1 hour
+    python check_a2a.py --hours 168  # Last 7 days
+    python check_a2a.py --days 30    # Last 30 days
+"""
 import boto3
 import json
 import sys
+import argparse
 from datetime import datetime, timedelta, timezone
 
 REGION = "us-east-1"
 LOG_GROUP = "/aws/bedrock-agentcore/runtimes/agentcore_multi_agent_OrchestratorAgent-kbGAc9F1OQ-DEFAULT"
 
+parser = argparse.ArgumentParser(description="Fetch A2A call logs")
+parser.add_argument("--hours", type=int, default=None, help="Hours to look back")
+parser.add_argument("--days", type=int, default=None, help="Days to look back")
+args = parser.parse_args()
+
+if args.days:
+    lookback = timedelta(days=args.days)
+    label = f"{args.days} day(s)"
+elif args.hours:
+    lookback = timedelta(hours=args.hours)
+    label = f"{args.hours} hour(s)"
+else:
+    lookback = timedelta(days=7)
+    label = "7 days"
+
 client = boto3.client("logs", region_name=REGION)
 
-# Get events from otel-rt-logs stream (last 2 hours)
-start_time = int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000)
+start_time = int((datetime.now(timezone.utc) - lookback).timestamp() * 1000)
 
-print("Fetching A2A calls from Orchestrator logs...\n")
+print(f"Fetching A2A calls from last {label}...\n")
 
 response = client.filter_log_events(
     logGroupName=LOG_GROUP,
@@ -21,29 +43,42 @@ response = client.filter_log_events(
 )
 
 a2a_calls = []
-for event in response.get("events", []):
-    msg = event["message"]
-    # Try to parse as OTEL JSON log
-    try:
-        obj = json.loads(msg)
-        body = obj.get("body", "")
-        trace_id = obj.get("traceId", "")
-        span_id = obj.get("spanId", "")
-        timestamp = obj.get("timeUnixNano", 0)
-        if "A2A_CALL" in str(body):
-            a2a_calls.append({
-                "trace_id": trace_id,
-                "span_id": span_id,
-                "body": body,
-                "timestamp": timestamp,
-            })
-    except json.JSONDecodeError:
-        # Plain text log line
-        if "A2A_CALL" in msg:
-            a2a_calls.append({"body": msg.strip(), "trace_id": "", "span_id": "", "timestamp": 0})
+events = response.get("events", [])
+
+# Paginate through all results
+while True:
+    for event in events:
+        msg = event["message"]
+        try:
+            obj = json.loads(msg)
+            body = obj.get("body", "")
+            trace_id = obj.get("traceId", "")
+            span_id = obj.get("spanId", "")
+            timestamp = obj.get("timeUnixNano", 0)
+            if "A2A_CALL" in str(body):
+                a2a_calls.append({
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "body": body,
+                    "timestamp": timestamp,
+                })
+        except json.JSONDecodeError:
+            if "A2A_CALL" in msg:
+                a2a_calls.append({"body": msg.strip(), "trace_id": "", "span_id": "", "timestamp": 0})
+
+    next_token = response.get("nextToken")
+    if not next_token:
+        break
+    response = client.filter_log_events(
+        logGroupName=LOG_GROUP,
+        startTime=start_time,
+        filterPattern="A2A_CALL",
+        nextToken=next_token,
+    )
+    events = response.get("events", [])
 
 if not a2a_calls:
-    print("No A2A calls found in the last 2 hours.")
+    print(f"No A2A calls found in the last {label}.")
     print(f"Log group: {LOG_GROUP}")
     sys.exit(0)
 
