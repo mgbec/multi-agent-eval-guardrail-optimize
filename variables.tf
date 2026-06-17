@@ -31,6 +31,17 @@ variable "factchecker_name" {
   }
 }
 
+variable "critic_name" {
+  description = "Name for the critic agent runtime"
+  type        = string
+  default     = "CriticAgent"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9_]{0,47}$", var.critic_name))
+    error_message = "Agent name must start with a letter, max 48 characters, alphanumeric and underscores only."
+  }
+}
+
 variable "network_mode" {
   description = "Network mode for AgentCore resources"
   type        = string

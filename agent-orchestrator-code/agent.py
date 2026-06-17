@@ -27,6 +27,11 @@ FACTCHECKER_ARN = os.getenv("FACTCHECKER_ARN")
 if not FACTCHECKER_ARN:
     raise EnvironmentError("FACTCHECKER_ARN environment variable is required")
 
+# Environment variable for Critic Agent ARN (required - set by Terraform)
+CRITIC_ARN = os.getenv("CRITIC_ARN")
+if not CRITIC_ARN:
+    raise EnvironmentError("CRITIC_ARN environment variable is required")
+
 
 def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
     """Generic helper to invoke any agent runtime using boto3"""
@@ -123,29 +128,59 @@ def call_factchecker_agent(claim: str) -> Dict[str, Any]:
     return {"status": "success", "content": [{"text": result}]}
 
 
+@tool
+def call_critic_agent(content_to_evaluate: str) -> Dict[str, Any]:
+    """
+    Call the critic agent to evaluate the quality of a response.
+    Use this tool after receiving a response from the specialist or fact checker
+    to assess its quality and get improvement suggestions.
+
+    Use the critic when:
+    - You want to verify the quality of a specialist's response before presenting it
+    - The question is important and deserves a quality check
+    - You want to know if the response needs more detail or has gaps
+
+    Args:
+        content_to_evaluate: The response text to evaluate (include the original question for context)
+
+    Returns:
+        Quality score (1-10), verdict, strengths, weaknesses, and improvement suggestion
+    """
+    result = invoke_agent_runtime(CRITIC_ARN, "critic", content_to_evaluate)
+    return {"status": "success", "content": [{"text": result}]}
+
+
 def create_orchestrator_agent() -> Agent:
-    """Create the orchestrator agent with tools to call specialist and fact checker"""
+    """Create the orchestrator agent with tools to call specialist, fact checker, and critic"""
     system_prompt = """You are an orchestrator agent that coordinates between specialized agents.
-    You have two tools available:
+    You have three tools available:
 
     1. call_specialist_agent - For detailed analysis, explanations, and complex research tasks
     2. call_factchecker_agent - For verifying claims, checking facts, and assessing truthfulness
+    3. call_critic_agent - For evaluating the quality of responses from other agents
 
     Routing guidelines:
     - For questions requiring detailed analysis or explanation → use call_specialist_agent
     - For verifying specific claims or statements → use call_factchecker_agent
-    - For complex queries that involve both analysis AND fact verification → use BOTH tools
-      (first get the analysis from the specialist, then verify key claims with the fact checker)
+    - For complex queries that involve both analysis AND fact verification → use BOTH specialist and factchecker
     - For simple greetings or basic questions → handle directly yourself
 
-    When using both tools, synthesize their responses into a coherent answer."""
+    Quality feedback loop (use for important questions):
+    - After getting a response from the specialist, use call_critic_agent to evaluate it
+    - Pass the critic both the original question AND the specialist's response
+    - If the critic scores below 7/10, call the specialist again with the critic's feedback
+    - Include the critic's suggestion in your retry prompt to the specialist
+    - Present the final (improved) response to the user
+
+    When using multiple tools, synthesize their responses into a coherent answer.
+    Always mention if you used the critic to improve a response."""
 
     model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
     model = BedrockModel(model_id=model_id)
 
     return Agent(
         model=model,
-        tools=[call_specialist_agent, call_factchecker_agent],
+        tools=[call_specialist_agent, call_factchecker_agent, call_critic_agent],
         system_prompt=system_prompt,
         name="OrchestratorAgent",
     )

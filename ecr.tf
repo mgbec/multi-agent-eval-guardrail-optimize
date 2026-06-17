@@ -191,3 +191,66 @@ resource "aws_ecr_lifecycle_policy" "factchecker" {
     ]
   })
 }
+
+# ============================================================================
+# Critic Agent ECR
+# ============================================================================
+
+resource "aws_ecr_repository" "critic" {
+  name                 = "${var.stack_name}-${var.ecr_repository_name}-critic"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  force_delete = true
+
+  tags = {
+    Name   = "${var.stack_name}-critic-ecr-repository"
+    Module = "ECR"
+    Agent  = "Critic"
+  }
+}
+
+resource "aws_ecr_repository_policy" "critic" {
+  repository = aws_ecr_repository.critic.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPullFromAccount"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.id}:root"
+        }
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_ecr_lifecycle_policy" "critic" {
+  repository = aws_ecr_repository.critic.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 5 images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 5
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}

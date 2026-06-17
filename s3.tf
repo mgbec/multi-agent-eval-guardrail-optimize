@@ -162,3 +162,53 @@ resource "aws_s3_object" "factchecker_source" {
     MD5   = data.archive_file.factchecker_source.output_md5
   }
 }
+
+# ============================================================================
+# Critic Agent Source
+# ============================================================================
+
+resource "aws_s3_bucket" "critic_source" {
+  bucket_prefix = "acma-crit-src-"
+  force_destroy = true
+
+  tags = {
+    Name    = "${var.stack_name}-critic-source"
+    Purpose = "Store Critic agent source code for CodeBuild"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "critic_source" {
+  bucket = aws_s3_bucket.critic_source.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "critic_source" {
+  bucket = aws_s3_bucket.critic_source.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+data "archive_file" "critic_source" {
+  type        = "zip"
+  source_dir  = "${path.module}/agent-critic-code"
+  output_path = "${path.module}/.terraform/agent-critic-code.zip"
+}
+
+resource "aws_s3_object" "critic_source" {
+  bucket = aws_s3_bucket.critic_source.id
+  key    = "agent-critic-code-${data.archive_file.critic_source.output_md5}.zip"
+  source = data.archive_file.critic_source.output_path
+  etag   = data.archive_file.critic_source.output_md5
+
+  tags = {
+    Name  = "agent-critic-source-code"
+    Agent = "Critic"
+    MD5   = data.archive_file.critic_source.output_md5
+  }
+}
