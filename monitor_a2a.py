@@ -29,7 +29,7 @@ from collections import defaultdict
 # ============================================================================
 
 REGION = "us-east-1"
-ALLOWED_TARGETS = {"specialist", "factchecker"}
+ALLOWED_TARGETS = {"specialist", "factchecker", "critic"}
 MAX_QUERY_LENGTH = 5000       # Flag queries larger than this
 MAX_RESPONSE_LENGTH = 50000   # Flag responses larger than this
 MAX_LATENCY_MS = 120000       # Flag calls taking longer than 2 minutes

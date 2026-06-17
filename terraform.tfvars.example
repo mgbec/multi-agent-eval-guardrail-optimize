@@ -8,6 +8,7 @@
 orchestrator_name  = "OrchestratorAgent"
 specialist_name    = "SpecialistAgent"
 factchecker_name   = "FactCheckerAgent"
+critic_name        = "CriticAgent"
 stack_name         = "agentcore-multi-agent"
 
 # Network Configuration

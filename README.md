@@ -28,11 +28,13 @@ This Terraform module deploys a multi-agent system using Amazon Bedrock AgentCor
 
 ## Overview
 
-This pattern demonstrates deploying a multi-agent system with three coordinating agents. The Orchestrator routes requests to either the Specialist (for detailed analysis) or the Fact Checker (for claim verification), enabling modular and scalable agent architectures with full distributed tracing.
+This pattern demonstrates deploying a multi-agent system with four coordinating agents. The Orchestrator routes requests to the Specialist (detailed analysis), the Fact Checker (claim verification), and the Critic (quality evaluation with feedback loops), enabling modular and scalable agent architectures with full distributed tracing.
 
 **Key Features:**
-- Three-agent architecture with multi-hop interagent communication
+- Four-agent architecture with multi-hop interagent communication and quality feedback loops
 - ADOT (AWS Distro for OpenTelemetry) instrumentation for full distributed tracing
+- Web search capability via Tavily API (Specialist and Fact Checker)
+- Critic agent providing live LLM-as-a-judge quality scoring
 - Automated Docker image building via CodeBuild
 - S3-based source code management with change detection
 - IAM-based security with least-privilege access
@@ -67,6 +69,12 @@ This makes it ideal for:
 - Returns structured verdicts (TRUE/FALSE/PARTIALLY TRUE) with confidence levels
 - Invoked by Orchestrator when factual accuracy needs verification
 
+**Critic Agent**
+- Independent agent for quality evaluation
+- Scores responses (1-10) and provides actionable feedback
+- Enables quality feedback loops: Orchestrator can retry Specialist with Critic's suggestions
+- Creates multi-hop trace patterns (Specialist → Critic → retry Specialist)
+
 ### Inter-Agent Communication, but not formal A2A Protocol
 
 > **Note:** This project uses direct `InvokeAgentRuntime` API calls between agents — not the formal [A2A protocol](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) (Google's Agent-to-Agent spec with JSON-RPC, agent cards, and OAuth). See below for the distinction.
@@ -92,23 +100,25 @@ This makes it ideal for:
 
 This Terraform configuration creates:
 
-- **3 S3 Buckets**: Source code storage for all agents with versioning
-- **3 ECR Repositories**: Container registries for ARM64 Docker images
-- **3 CodeBuild Projects**: Automated image building and pushing
-- **4 IAM Roles**: 
-  - Orchestrator execution role (with A2A permissions to invoke both agents)
+- **4 S3 Buckets**: Source code storage for all agents with versioning
+- **4 ECR Repositories**: Container registries for ARM64 Docker images
+- **4 CodeBuild Projects**: Automated image building and pushing
+- **5 IAM Roles**: 
+  - Orchestrator execution role (with A2A permissions to invoke all downstream agents)
   - Specialist execution role (standard permissions)
   - Fact Checker execution role (standard permissions)
+  - Critic execution role (standard permissions)
   - CodeBuild service role
-- **3 Agent Runtimes**: 
-  - Orchestrator with `SPECIALIST_ARN` and `FACTCHECKER_ARN` environment variables
-  - Specialist (independent runtime)
-  - Fact Checker (independent runtime)
+- **4 Agent Runtimes**: 
+  - Orchestrator with `SPECIALIST_ARN`, `FACTCHECKER_ARN`, and `CRITIC_ARN` environment variables
+  - Specialist (independent runtime with web search)
+  - Fact Checker (independent runtime with web search)
+  - Critic (independent runtime)
 - **ADOT Observability**: OpenTelemetry auto-instrumentation with Strands GenAI spans
 - **Build Automation**: Automatic rebuild on code changes (MD5-based detection)
 - **Supporting Resources**: S3 lifecycle policies, ECR lifecycle policies, IAM policies
 
-**Total:** ~45 AWS resources deployed and managed by Terraform
+**Total:** ~60 AWS resources deployed and managed by Terraform
 
 ## Prerequisites
 
@@ -369,10 +379,14 @@ This shows the full trace hierarchy — Orchestrator calling Specialist and/or F
 - `call_factchecker_agent`: Invokes Fact Checker for claim verification
   - Parameters: `claim` (string)
   - Returns: Verdict with confidence level
+- `call_critic_agent`: Invokes Critic to evaluate a response's quality
+  - Parameters: `content_to_evaluate` (string)
+  - Returns: Score (1-10), verdict, strengths, weaknesses, improvement suggestion
 
 **Use Cases:**
 - Complex workflow orchestration across multiple agents
-- Multi-step processing (analyze then verify)
+- Multi-step processing (analyze → evaluate → retry if needed)
+- Quality feedback loops for important queries
 - Intelligent routing based on query type
 
 ### Specialist Agent
@@ -410,6 +424,20 @@ This shows the full trace hierarchy — Orchestrator calling Specialist and/or F
 - Verifying factual claims against current sources
 - Assessing accuracy of statements
 - Providing evidence-based verdicts with citations
+
+### Critic Agent
+
+**Capabilities:**
+- Quality scoring (1-10) of other agents' responses
+- Structured feedback (EXCELLENT/GOOD/NEEDS_IMPROVEMENT/POOR)
+- Actionable improvement suggestions
+- Strengths and weaknesses identification
+
+**Use Cases:**
+- Live LLM-as-a-judge quality evaluation
+- Quality feedback loops (Specialist → Critic → improved Specialist response)
+- Response quality monitoring
+- Comparing output quality across model or prompt changes
 
 ## Customization
 
@@ -468,6 +496,10 @@ multi-agent-runtime/
 │   ├── agent.py                 # Main agent implementation
 │   ├── Dockerfile               # Container definition with ADOT
 │   └── requirements.txt         # Python dependencies
+├── agent-critic-code/                 # Critic agent source code
+│   ├── agent.py                 # Main agent implementation
+│   ├── Dockerfile               # Container definition with ADOT
+│   └── requirements.txt         # Python dependencies
 ├── scripts/
 │   ├── build-image.ps1          # PowerShell build script (Windows)
 │   └── build-image.sh           # Bash build script (Linux/macOS)
@@ -478,6 +510,7 @@ multi-agent-runtime/
 ├── orchestrator.tf              # Orchestrator runtime configuration
 ├── specialist.tf                # Specialist runtime configuration
 ├── factchecker.tf               # Fact Checker runtime configuration
+├── critic.tf                    # Critic runtime configuration
 ├── main.tf                      # Main Terraform configuration & build triggers
 ├── variables.tf                 # Input variables
 ├── outputs.tf                   # Output definitions
@@ -489,6 +522,7 @@ multi-agent-runtime/
 ├── buildspec-orchestrator.yml   # Orchestrator build specification
 ├── buildspec-specialist.yml     # Specialist build specification
 ├── buildspec-factchecker.yml    # Fact Checker build specification
+├── buildspec-critic.yml         # Critic build specification
 ├── terraform.tfvars.example     # Example variable values
 ├── backend.tf.example           # Example backend configuration
 ├── deploy.sh                    # Deployment automation script
@@ -557,7 +591,7 @@ Monitor in AWS Console:
 
 **Orchestrator Execution Role:**
 - Standard AgentCore permissions
-- **Critical**: `bedrock-agentcore:InvokeAgentRuntime` for both Specialist and Fact Checker
+- **Critical**: `bedrock-agentcore:InvokeAgentRuntime` for Specialist, Fact Checker, and Critic
 - Bedrock model invocation (Converse/ConverseStream)
 - AWS Marketplace permissions for model subscription
 
@@ -571,9 +605,14 @@ Monitor in AWS Console:
 - Bedrock model invocation
 - No cross-agent invocation permissions needed
 
+**Critic Execution Role:**
+- Standard AgentCore permissions
+- Bedrock model invocation
+- No cross-agent invocation permissions needed
+
 **CodeBuild Role:**
-- S3 access to all three agent source buckets
-- ECR push access to all three repositories
+- S3 access to all four agent source buckets
+- ECR push access to all four repositories
 - CloudWatch Logs write access
 
 ### Network Security
