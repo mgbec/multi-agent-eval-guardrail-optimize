@@ -97,23 +97,43 @@ def invoke_orchestrator(client, arn, prompt):
         return {"status": "error", "raw": body}
 
 
+def progress_indicator(stop_event, start_time):
+    """Show elapsed time while waiting for response."""
+    import time
+    while not stop_event.is_set():
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+        print(f"\r  Waiting... {elapsed:.0f}s", end="", flush=True)
+        time.sleep(1)
+    print("\r" + " " * 30 + "\r", end="", flush=True)
+
+
 def run_scenario(client, arn, scenario, index):
     """Run a single test scenario."""
+    import threading
+
     print(f"\n{'=' * 70}")
     print(f"  TEST {index}: {scenario['name']}")
     print(f"  {scenario['description']}")
     print(f"{'=' * 70}")
     print(f"\n  Prompt: {scenario['prompt'][:100]}...")
     print(f"  Expected agents: {scenario['expected_agents']}")
-    print(f"\n  Invoking (may take 30-120s)...\n")
+    print()
 
     start_time = datetime.now(timezone.utc)
+    stop_event = threading.Event()
+    spinner = threading.Thread(target=progress_indicator, args=(stop_event, start_time), daemon=True)
+    spinner.start()
 
     try:
         result = invoke_orchestrator(client, arn, scenario["prompt"])
     except Exception as e:
+        stop_event.set()
+        spinner.join()
         print(f"  ERROR: {e}")
         return False
+
+    stop_event.set()
+    spinner.join()
 
     elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
 

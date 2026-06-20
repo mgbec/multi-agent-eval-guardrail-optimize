@@ -70,6 +70,18 @@ def extract_region_from_arn(arn):
         )
 
 
+def progress_indicator(stop_event):
+    """Show elapsed time while waiting for response."""
+    import time
+    from datetime import datetime, timezone
+    start = datetime.now(timezone.utc)
+    while not stop_event.is_set():
+        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        print(f"\r  Waiting... {elapsed:.0f}s", end="", flush=True)
+        time.sleep(1)
+    print("\r" + " " * 30 + "\r", end="", flush=True)
+
+
 def test_agent(client, agent_arn, agent_name, prompt):
     """Test a single agent with a given prompt
 
@@ -79,8 +91,14 @@ def test_agent(client, agent_arn, agent_name, prompt):
         agent_name: Name for display purposes
         prompt: Test prompt to send
     """
+    import threading
+
     print(f"\nPrompt: '{prompt}'")
     print("-" * 80)
+
+    stop_event = threading.Event()
+    spinner = threading.Thread(target=progress_indicator, args=(stop_event,), daemon=True)
+    spinner.start()
 
     try:
         response = client.invoke_agent_runtime(
@@ -88,6 +106,9 @@ def test_agent(client, agent_arn, agent_name, prompt):
             qualifier="DEFAULT",
             payload=json.dumps({"prompt": prompt}),
         )
+
+        stop_event.set()
+        spinner.join()
 
         print(f"Status: {response['ResponseMetadata']['HTTPStatusCode']}")
         print(f"Content Type: {response.get('contentType', 'N/A')}")
@@ -119,6 +140,8 @@ def test_agent(client, agent_arn, agent_name, prompt):
         return True
 
     except Exception as e:
+        stop_event.set()
+        spinner.join()
         print(f"\n❌ Error testing {agent_name}: {e}")
         return False
 
