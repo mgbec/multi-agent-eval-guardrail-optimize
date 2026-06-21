@@ -613,6 +613,10 @@ python eval_goal_attainment.py --session-id "your-session-id"
 
 # Evaluate the last 5 sessions
 python eval_goal_attainment.py --all-recent
+
+# Look back further in time (default is 2 hours)
+python eval_goal_attainment.py --hours 12
+python eval_goal_attainment.py --days 7 --all-recent
 ```
 
 ### Built-in Evaluators Used
