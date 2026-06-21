@@ -45,6 +45,7 @@ response.json
 body.json
 a2a_report.json
 monitor_checks_explained.json
+eval_results.json
 
 # ============================================================================
 # Python
