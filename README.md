@@ -526,6 +526,8 @@ multi-agent-runtime/
 ├── s3.tf                        # S3 buckets for source code
 ├── ecr.tf                       # ECR repositories
 ├── codebuild.tf                 # CodeBuild projects
+├── guardrail.tf                 # Bedrock Guardrail (content + prompt attack filtering)
+├── secrets.tf                   # Secrets Manager (Tavily API key)
 ├── versions.tf                  # Terraform and provider versions
 ├── buildspec-orchestrator.yml   # Orchestrator build specification
 ├── buildspec-specialist.yml     # Specialist build specification
@@ -681,12 +683,27 @@ python eval_goal_attainment.py --all-recent
 - S3 buckets block public access
 - IAM policies follow least-privilege principle
 
+### Bedrock Guardrail
+
+A Bedrock Guardrail is applied to all agents, filtering both inputs and outputs:
+
+- **Content filtering**: Blocks hate, insults, sexual content, violence, misconduct
+- **Prompt attack detection**: Blocks prompt injection attempts on input
+- **Sensitive data blocking**: AWS access keys, secret keys, credit cards, SSNs
+
+The guardrail is defined in `guardrail.tf` and applied to all agents via the `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VER` environment variables.
+
 ### Secrets Management
 
-For sensitive data:
-- Use AWS Secrets Manager
-- Pass secret ARNs as environment variables
-- Retrieve secrets at runtime in agent code
+The Tavily API key is stored in AWS Secrets Manager (`secrets.tf`):
+- Secret name: `agentcore-multi-agent/tavily-api-key`
+- Agents retrieve it at runtime via `secretsmanager:GetSecretValue`
+- IAM permissions scoped to the specific secret ARN only
+- Falls back to `TAVILY_API_KEY` env var for local testing
+
+### Retry Limits
+
+The Critic feedback loop is capped at a maximum of 2 retries (configurable via `MAX_CRITIC_RETRIES` env var). This prevents unbounded token consumption from loops where the Critic repeatedly scores responses below threshold.
 
 ### Security Monitoring
 
