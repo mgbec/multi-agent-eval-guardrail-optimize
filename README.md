@@ -514,6 +514,7 @@ multi-agent-runtime/
 ├── test_critic_loop.py          # Critic feedback loop test suite (5 scenarios)
 ├── monitor_a2a.py               # A2A security monitoring script
 ├── check_a2a.py                 # A2A call log inspector
+├── eval_goal_attainment.py      # Goal attainment evaluation (AgentCore built-in evaluators)
 ├── orchestrator.tf              # Orchestrator runtime configuration
 ├── specialist.tf                # Specialist runtime configuration
 ├── factchecker.tf               # Fact Checker runtime configuration
@@ -591,6 +592,57 @@ Monitor in AWS Console:
 - **CloudWatch GenAI Observability**: Distributed trace visualization
 - **ECR Repositories**: View Docker images
 - **CodeBuild**: Monitor build status
+
+## Evaluations
+
+This project includes offline evaluation using AgentCore's built-in evaluators to assess agent quality after invocations complete.
+
+### Running Evaluations
+
+```powershell
+# Evaluate the most recent session
+python eval_goal_attainment.py
+
+# Invoke, wait for traces, then evaluate in one step
+python eval_goal_attainment.py --invoke "Explain serverless computing and verify Lambda has a 15-min timeout"
+
+# Evaluate a specific session by ID
+python eval_goal_attainment.py --session-id "your-session-id"
+
+# Evaluate the last 5 sessions
+python eval_goal_attainment.py --all-recent
+```
+
+### Built-in Evaluators Used
+
+| Evaluator | What it measures | Level |
+|-----------|-----------------|-------|
+| `Builtin.Helpfulness` | Was the response useful to the user? | Trace |
+| `Builtin.GoalSuccessRate` | Did the agent achieve the user's stated goal? | Trace |
+| `Builtin.ToolSelectionAccuracy` | Were the right tools (agents) selected? | Tool call |
+
+### How It Works
+
+1. The script collects span logs from CloudWatch (agent runtime logs + `aws/spans`)
+2. Passes them to AgentCore's `Evaluate` API with each built-in evaluator
+3. Each evaluator uses an LLM-as-a-judge to score the session
+4. Results include a numeric score, label, and explanation
+
+### Evaluations vs. Live Critic
+
+| | Live Critic Agent | Offline Evaluations |
+|---|---|---|
+| **When** | During the request | After the request completes |
+| **Purpose** | Quality gate (can trigger retries) | Assessment and monitoring |
+| **Can change outcome** | Yes (retry with feedback) | No (read-only) |
+| **Cost impact** | Adds latency + tokens to every request | Runs independently, no user impact |
+| **Use case** | Important questions needing quality assurance | Regression testing, trend monitoring, A/B comparison |
+
+### Prerequisites for Evaluations
+
+- CloudWatch Transaction Search must be enabled (one-time account setup)
+- Agent must have been invoked with traces recorded
+- Spans take ~30 seconds to propagate to CloudWatch after invocation
 
 ## Security
 
