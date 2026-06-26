@@ -48,6 +48,7 @@ monitor_checks_explained.json
 eval_results.json
 test_results.json
 test_results.csv
+recommendation_result.json
 
 # ============================================================================
 # Python
