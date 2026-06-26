@@ -515,6 +515,7 @@ multi-agent-runtime/
 ├── monitor_a2a.py               # A2A security monitoring script
 ├── check_a2a.py                 # A2A call log inspector
 ├── eval_goal_attainment.py      # Goal attainment evaluation (AgentCore built-in evaluators)
+├── optimize_prompts.py          # AgentCore Optimization (prompt recommendations)
 ├── orchestrator.tf              # Orchestrator runtime configuration
 ├── specialist.tf                # Specialist runtime configuration
 ├── factchecker.tf               # Fact Checker runtime configuration
@@ -649,6 +650,62 @@ python eval_goal_attainment.py --days 7 --all-recent
 - CloudWatch Transaction Search must be enabled (one-time account setup)
 - Agent must have been invoked with traces recorded
 - Spans take ~30 seconds to propagate to CloudWatch after invocation
+
+## Optimization
+
+AgentCore Optimization uses AI to improve your agent's prompts and tool descriptions based on real trace data.
+
+### How It Works
+
+1. Your agents run and generate traces in CloudWatch
+2. The Recommendations API analyzes failure patterns against an evaluator (e.g., `Builtin.GoalSuccessRate`)
+3. It generates an improved system prompt or tool descriptions
+4. You review, apply, and validate the improvement
+
+### Running Optimizations
+
+```powershell
+# Optimize the Orchestrator's system prompt (most impactful)
+python optimize_prompts.py
+
+# Optimize a specific agent
+python optimize_prompts.py --agent specialist
+python optimize_prompts.py --agent factchecker
+python optimize_prompts.py --agent critic
+
+# Optimize tool descriptions (improves routing accuracy)
+python optimize_prompts.py --tools
+
+# Use a different evaluator as the optimization target
+python optimize_prompts.py --evaluator Builtin.Helpfulness
+
+# Analyze more trace history
+python optimize_prompts.py --days 14
+```
+
+Results are saved to `recommendation_result.json` with the improved prompt and an explanation of what was changed.
+
+### Optimization Workflow
+
+```
+1. Generate traces    → python test_multi_agent.py <ARN>
+2. Run optimization   → python optimize_prompts.py
+3. Review result      → cat recommendation_result.json
+4. Apply changes      → Update agent.py with new prompt
+5. Redeploy           → terraform apply
+6. Validate           → python eval_goal_attainment.py --invoke "test question"
+7. Compare scores     → Did the new prompt score higher?
+```
+
+### What Can Be Optimized
+
+| Target | Script flag | What it improves |
+|--------|-------------|-----------------|
+| Orchestrator system prompt | `--agent orchestrator` | Routing decisions, quality loop behavior |
+| Specialist system prompt | `--agent specialist` | Research depth, web search usage |
+| Fact Checker system prompt | `--agent factchecker` | Verdict accuracy, evidence gathering |
+| Critic system prompt | `--agent critic` | Scoring calibration, feedback quality |
+| Tool descriptions | `--tools` | Reduces wrong-agent routing |
 
 ## Security
 
