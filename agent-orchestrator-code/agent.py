@@ -60,12 +60,12 @@ def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
             "payload": json.dumps({"prompt": query}),
         }
 
-        # Propagate session ID for trace coherence (use child session to avoid conflicts)
+        # Propagate session ID for trace coherence (unique per call to avoid conflicts)
         session_id = getattr(_session_context, "session_id", None)
         if session_id:
-            # Create a child session ID: parent_session + agent_name to maintain coherence
-            # without reusing the exact same session (which can cause routing conflicts)
-            child_session_id = f"{session_id}-{agent_name}"
+            import uuid
+            call_id = uuid.uuid4().hex[:8]
+            child_session_id = f"{session_id}-{agent_name}-{call_id}"
             invoke_kwargs["runtimeSessionId"] = child_session_id
             logger.info(f"A2A_SESSION_PROPAGATE | agent={agent_name} | parent_session={session_id} | child_session={child_session_id}")
 
