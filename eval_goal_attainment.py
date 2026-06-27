@@ -236,16 +236,82 @@ def evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes
     """Run all evaluators against a trace and return results."""
     print(f"\n  Collecting spans for trace: {trace_id[:16]}...")
 
-    spans = collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=minutes_back)
-    if not spans:
+    all_spans = collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=minutes_back)
+    if not all_spans:
         return {"trace_id": trace_id, "error": "No spans found", "results": []}
 
-    print(f"  Found {len(spans)} spans (full multi-agent trace)")
+    print(f"  Found {len(all_spans)} total spans across all agents")
+
+    # The Evaluate API requires spans from a single session.
+    # Group by session ID and use the Orchestrator's session (which has the user's question + final answer)
+    import re
+    sessions = {}
+    for span in all_spans:
+        # Extract session.id from span
+        sid = ""
+        attrs = span.get("attributes", {})
+        if isinstance(attrs, dict):
+            sid = attrs.get("session.id", "")
+        if not sid:
+            # Try to find it in the JSON string representation
+            span_str = json.dumps(span)
+            match = re.search(r'"session\.id"\s*:\s*"([^"]+)"', span_str)
+            if match:
+                sid = match.group(1)
+        if not sid:
+            sid = "unknown"
+
+        if sid not in sessions:
+            sessions[sid] = []
+        sessions[sid].append(span)
+
+    print(f"  Sessions found: {len(sessions)}")
+    for sid, spans in sessions.items():
+        # Identify which agent this session belongs to
+        agent_hint = "unknown"
+        for s in spans:
+            name = s.get("name", "")
+            resource = s.get("resource", {}).get("attributes", {})
+            svc = resource.get("service.name", "")
+            if "orchestrator" in svc.lower() or "Orchestrator" in name:
+                agent_hint = "orchestrator"
+                break
+            elif "specialist" in svc.lower():
+                agent_hint = "specialist"
+                break
+            elif "factchecker" in svc.lower() or "FactChecker" in name:
+                agent_hint = "factchecker"
+                break
+            elif "critic" in svc.lower() or "Critic" in name:
+                agent_hint = "critic"
+                break
+        print(f"    {sid[:20]}... → {agent_hint} ({len(spans)} spans)")
+
+    # Find the Orchestrator's session (largest span count or identified by service name)
+    orchestrator_session = None
+    orchestrator_spans = []
+    for sid, spans in sessions.items():
+        for s in spans:
+            resource = s.get("resource", {}).get("attributes", {})
+            svc = resource.get("service.name", "")
+            if "orchestrator" in svc.lower():
+                orchestrator_session = sid
+                orchestrator_spans = spans
+                break
+        if orchestrator_session:
+            break
+
+    # Fall back to the session with the most spans
+    if not orchestrator_spans:
+        orchestrator_session = max(sessions, key=lambda k: len(sessions[k]))
+        orchestrator_spans = sessions[orchestrator_session]
+
+    print(f"\n  Evaluating Orchestrator session: {orchestrator_session[:20]}... ({len(orchestrator_spans)} spans)")
 
     all_results = []
     for evaluator_id in EVALUATORS:
         print(f"  Running {evaluator_id}...", end=" ")
-        results = run_evaluation(agentcore_client, evaluator_id, spans)
+        results = run_evaluation(agentcore_client, evaluator_id, orchestrator_spans)
         for r in results:
             r["evaluator_used"] = evaluator_id
         all_results.extend(results)
@@ -259,7 +325,7 @@ def evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes
             else:
                 print("Done")
 
-    return {"trace_id": trace_id, "span_count": len(spans), "results": all_results}
+    return {"trace_id": trace_id, "span_count": len(orchestrator_spans), "total_spans": len(all_spans), "results": all_results}
 
 
 # ============================================================================
