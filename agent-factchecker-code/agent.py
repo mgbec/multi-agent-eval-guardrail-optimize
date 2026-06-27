@@ -138,10 +138,13 @@ def create_factchecker_agent() -> Agent:
 
 
 @app.entrypoint
-async def invoke(payload=None):
+async def invoke(payload=None, context=None):
     """Main entrypoint for fact checker agent"""
     try:
         query = payload.get("prompt", "The sky is blue.") if payload else "The sky is blue."
+        parent_session = payload.get("_parent_session_id", "") if payload else ""
+        if parent_session:
+            logger.info(f"SESSION_CORRELATION | parent_session={parent_session} | agent=factchecker")
 
         agent = create_factchecker_agent()
         response = agent(query)

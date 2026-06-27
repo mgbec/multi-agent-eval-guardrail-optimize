@@ -133,10 +133,13 @@ def create_specialist_agent() -> Agent:
 
 
 @app.entrypoint
-async def invoke(payload=None):
+async def invoke(payload=None, context=None):
     """Main entrypoint for specialist agent"""
     try:
         query = payload.get("prompt", "Hello") if payload else "Hello"
+        parent_session = payload.get("_parent_session_id", "") if payload else ""
+        if parent_session:
+            logger.info(f"SESSION_CORRELATION | parent_session={parent_session} | agent=specialist")
 
         agent = create_specialist_agent()
         response = agent(query)

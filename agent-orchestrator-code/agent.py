@@ -60,14 +60,18 @@ def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
             "payload": json.dumps({"prompt": query}),
         }
 
-        # Propagate session ID for trace coherence (unique per call to avoid conflicts)
+        # Session correlation for observability:
+        # We log the parent session ID in the payload metadata so traces can be correlated,
+        # but we do NOT pass runtimeSessionId to downstream agents because AgentCore uses it
+        # for sticky session routing, which causes deadlocks when the Orchestrator is already
+        # occupying a session and tries to call a downstream agent on the same or related session.
         session_id = getattr(_session_context, "session_id", None)
         if session_id:
-            import uuid
-            call_id = uuid.uuid4().hex[:8]
-            child_session_id = f"{session_id}-{agent_name}-{call_id}"
-            invoke_kwargs["runtimeSessionId"] = child_session_id
-            logger.info(f"A2A_SESSION_PROPAGATE | agent={agent_name} | parent_session={session_id} | child_session={child_session_id}")
+            # Embed parent session in the payload so downstream agents can log it
+            payload_data = json.loads(invoke_kwargs["payload"])
+            payload_data["_parent_session_id"] = session_id
+            invoke_kwargs["payload"] = json.dumps(payload_data)
+            logger.info(f"A2A_SESSION_CONTEXT | agent={agent_name} | orchestrator_session={session_id}")
 
         response = agentcore_client.invoke_agent_runtime(**invoke_kwargs)
 

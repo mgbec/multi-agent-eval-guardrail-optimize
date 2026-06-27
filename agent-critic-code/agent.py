@@ -66,10 +66,13 @@ def create_critic_agent() -> Agent:
 
 
 @app.entrypoint
-async def invoke(payload=None):
+async def invoke(payload=None, context=None):
     """Main entrypoint for critic agent"""
     try:
         query = payload.get("prompt", "") if payload else ""
+        parent_session = payload.get("_parent_session_id", "") if payload else ""
+        if parent_session:
+            logger.info(f"SESSION_CORRELATION | parent_session={parent_session} | agent=critic")
 
         if not query:
             return {"status": "error", "agent": "critic", "error": "No content to evaluate"}
