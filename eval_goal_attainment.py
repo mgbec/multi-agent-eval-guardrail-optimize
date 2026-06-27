@@ -104,82 +104,81 @@ def query_logs(logs_client, log_group_name, query_string, minutes_back=120):
     return result["results"]
 
 
-def get_recent_session_ids(logs_client, log_group, limit=5, minutes_back=120):
-    """Get the most recent session IDs from traces."""
-    # aws/spans stores spans as JSON in @message. Session ID is inside the JSON.
-    query = f"""fields @timestamp, @message
-    | filter @message like /session.id/
+def get_recent_trace_ids(logs_client, log_group, limit=5, minutes_back=120):
+    """Get recent trace IDs from the Orchestrator's log group.
+    Trace IDs are shared across all agents in a single request via OTEL propagation."""
+    import re
+
+    # Find trace IDs from the orchestrator's OTEL logs
+    query = f"""fields @message
+    | filter @message like /traceId/
     | sort @timestamp desc
     | limit 200"""
 
-    results = query_logs(logs_client, "aws/spans", query, minutes_back=minutes_back)
+    results = query_logs(logs_client, log_group, query, minutes_back=minutes_back)
 
-    # Extract session IDs from the raw JSON messages
-    import re
-    session_ids = set()
+    trace_ids = set()
     for row in results:
         for field in row:
             if field["field"] == "@message":
-                # Look for session.id in the JSON
-                matches = re.findall(r'"session\.id"\s*:\s*"([^"]+)"', field["value"])
+                # Extract traceId from JSON spans
+                matches = re.findall(r'"traceId"\s*:\s*"([a-f0-9]{32})"', field["value"])
                 for m in matches:
-                    session_ids.add(m)
+                    if m != "0" * 32:  # Skip empty trace IDs
+                        trace_ids.add(m)
 
-    # Return most recent (deduplicated)
-    sessions = list(session_ids)[:limit]
-
-    if sessions:
-        return sessions
-
-    # Fall back: check runtime log group for session IDs in OTEL logs
-    query2 = f"""fields @message
-    | filter @message like /session.id/
-    | sort @timestamp desc
-    | limit 100"""
-
-    results = query_logs(logs_client, log_group, query2, minutes_back=minutes_back)
-    for row in results:
-        for field in row:
-            if field["field"] == "@message":
-                matches = re.findall(r'"session\.id"\s*:\s*"([^"]+)"', field["value"])
-                for m in matches:
-                    session_ids.add(m)
-
-    return list(session_ids)[:limit]
+    return list(trace_ids)[:limit]
 
 
-def collect_session_spans(logs_client, log_group, session_id, minutes_back=120):
-    """Collect all span logs for a given session."""
+def collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=120):
+    """Collect ALL spans for a trace ID across all log groups.
+    This captures the full multi-agent interaction regardless of session boundaries."""
     import re
 
-    # Query aws/spans for this session (session ID is inside JSON message)
+    all_spans = []
+
+    # Search aws/spans (platform spans + ADOT spans from all agents)
     aws_spans_query = f"""fields @message
-    | filter @message like "{session_id}"
+    | filter @message like "{trace_id}"
     | sort @timestamp asc
     | limit 1000"""
 
-    aws_span_results = query_logs(logs_client, "aws/spans", aws_spans_query, minutes_back=minutes_back)
+    aws_results = query_logs(logs_client, "aws/spans", aws_spans_query, minutes_back=minutes_back)
+    for row in aws_results:
+        for field in row:
+            if field["field"] == "@message" and field["value"].strip().startswith("{"):
+                try:
+                    all_spans.append(json.loads(field["value"]))
+                except json.JSONDecodeError:
+                    pass
 
-    # Also query the runtime log group
+    # Also search the orchestrator's runtime log group
     runtime_query = f"""fields @message
-    | filter @message like "{session_id}"
+    | filter @message like "{trace_id}"
     | sort @timestamp asc
-    | limit 1000"""
+    | limit 500"""
 
     runtime_results = query_logs(logs_client, log_group, runtime_query, minutes_back=minutes_back)
+    for row in runtime_results:
+        for field in row:
+            if field["field"] == "@message" and field["value"].strip().startswith("{"):
+                try:
+                    all_spans.append(json.loads(field["value"]))
+                except json.JSONDecodeError:
+                    pass
 
-    # Extract JSON messages
-    spans = []
-    for results in [aws_span_results, runtime_results]:
-        for row in results:
-            for field in row:
-                if field["field"] == "@message" and field["value"].strip().startswith("{"):
-                    try:
-                        spans.append(json.loads(field["value"]))
-                    except json.JSONDecodeError:
-                        pass
+    # Deduplicate by spanId
+    seen_span_ids = set()
+    unique_spans = []
+    for span in all_spans:
+        span_id = span.get("spanId", "")
+        if span_id and span_id not in seen_span_ids:
+            seen_span_ids.add(span_id)
+            unique_spans.append(span)
+        elif not span_id:
+            unique_spans.append(span)  # Keep spans without IDs (log events)
 
-    return spans
+    return unique_spans
 
 
 # ============================================================================
@@ -233,15 +232,15 @@ def run_evaluation(agentcore_client, evaluator_id, session_spans, trace_ids=None
         return [{"evaluatorId": evaluator_id, "errorMessage": str(e), "errorCode": "CLIENT_ERROR"}]
 
 
-def evaluate_session(agentcore_client, logs_client, log_group, session_id, minutes_back=120):
-    """Run all evaluators against a session and return results."""
-    print(f"\n  Collecting spans for session: {session_id[:20]}...")
+def evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes_back=120):
+    """Run all evaluators against a trace and return results."""
+    print(f"\n  Collecting spans for trace: {trace_id[:16]}...")
 
-    spans = collect_session_spans(logs_client, log_group, session_id, minutes_back=minutes_back)
+    spans = collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=minutes_back)
     if not spans:
-        return {"session_id": session_id, "error": "No spans found", "results": []}
+        return {"trace_id": trace_id, "error": "No spans found", "results": []}
 
-    print(f"  Found {len(spans)} spans")
+    print(f"  Found {len(spans)} spans (full multi-agent trace)")
 
     all_results = []
     for evaluator_id in EVALUATORS:
@@ -260,7 +259,7 @@ def evaluate_session(agentcore_client, logs_client, log_group, session_id, minut
             else:
                 print("Done")
 
-    return {"session_id": session_id, "span_count": len(spans), "results": all_results}
+    return {"trace_id": trace_id, "span_count": len(spans), "results": all_results}
 
 
 # ============================================================================
@@ -276,9 +275,9 @@ def print_report(evaluations):
     print(f"  Sessions evaluated: {len(evaluations)}")
 
     for eval_data in evaluations:
-        session = eval_data["session_id"]
+        session = eval_data.get("trace_id", eval_data.get("session_id", "unknown"))
         print(f"\n{'─' * 70}")
-        print(f"  Session: {session[:40]}...")
+        print(f"  Trace: {session[:40]}...")
 
         if "error" in eval_data:
             print(f"  Error: {eval_data['error']}")
@@ -376,37 +375,42 @@ def main():
         print(f"\n  Step 2: Waiting 30s for spans to propagate...")
         time.sleep(30)
 
-        print(f"\n  Step 3: Evaluating...")
-        eval_result = evaluate_session(agentcore_client, logs_client, log_group, session_id, minutes_back)
+        print(f"\n  Step 3: Finding trace ID and evaluating...")
+        trace_ids = get_recent_trace_ids(logs_client, log_group, limit=1, minutes_back=5)
+        if not trace_ids:
+            print("  No trace IDs found after invocation.")
+            sys.exit(1)
+
+        eval_result = evaluate_session(agentcore_client, logs_client, log_group, trace_ids[0], minutes_back)
         evaluations.append(eval_result)
 
     elif args.session_id:
-        # Evaluate specific session
+        # Evaluate by trace ID (accepting session_id flag for backwards compat, treating as trace ID)
         eval_result = evaluate_session(agentcore_client, logs_client, log_group, args.session_id, minutes_back)
         evaluations.append(eval_result)
 
     elif args.all_recent:
-        # Evaluate recent sessions
-        print(f"\n  Finding recent sessions (last {minutes_back} minutes)...")
-        sessions = get_recent_session_ids(logs_client, log_group, limit=5, minutes_back=minutes_back)
-        if not sessions:
-            print("  No sessions found in recent logs.")
+        # Evaluate recent traces
+        print(f"\n  Finding recent traces (last {minutes_back} minutes)...")
+        trace_ids = get_recent_trace_ids(logs_client, log_group, limit=5, minutes_back=minutes_back)
+        if not trace_ids:
+            print("  No traces found in recent logs.")
             sys.exit(0)
 
-        print(f"  Found {len(sessions)} sessions")
-        for session_id in sessions:
-            eval_result = evaluate_session(agentcore_client, logs_client, log_group, session_id, minutes_back)
+        print(f"  Found {len(trace_ids)} traces")
+        for trace_id in trace_ids:
+            eval_result = evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes_back)
             evaluations.append(eval_result)
 
     else:
-        # Default: evaluate most recent session
-        print(f"\n  Finding most recent session (last {minutes_back} minutes)...")
-        sessions = get_recent_session_ids(logs_client, log_group, limit=1, minutes_back=minutes_back)
-        if not sessions:
-            print("  No sessions found. Invoke the agent first.")
+        # Default: evaluate most recent trace
+        print(f"\n  Finding most recent trace (last {minutes_back} minutes)...")
+        trace_ids = get_recent_trace_ids(logs_client, log_group, limit=1, minutes_back=minutes_back)
+        if not trace_ids:
+            print("  No traces found. Invoke the agent first.")
             sys.exit(0)
 
-        eval_result = evaluate_session(agentcore_client, logs_client, log_group, sessions[0], minutes_back)
+        eval_result = evaluate_session(agentcore_client, logs_client, log_group, trace_ids[0], minutes_back)
         evaluations.append(eval_result)
 
     # Report
