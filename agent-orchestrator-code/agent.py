@@ -33,8 +33,14 @@ if not CRITIC_ARN:
     raise EnvironmentError("CRITIC_ARN environment variable is required")
 
 
+# Thread-local storage for session ID propagation to tool functions
+import threading
+_session_context = threading.local()
+
+
 def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
-    """Generic helper to invoke any agent runtime using boto3"""
+    """Generic helper to invoke any agent runtime using boto3.
+    Propagates the Orchestrator's session ID to downstream agents for trace coherence."""
     try:
         region = os.getenv("AWS_REGION")
         if not region:
@@ -47,11 +53,20 @@ def invoke_agent_runtime(agent_arn: str, agent_name: str, query: str) -> str:
         import time
         start_time = time.time()
 
-        response = agentcore_client.invoke_agent_runtime(
-            agentRuntimeArn=agent_arn,
-            qualifier="DEFAULT",
-            payload=json.dumps({"prompt": query}),
-        )
+        # Build invoke kwargs — propagate session ID if available
+        invoke_kwargs = {
+            "agentRuntimeArn": agent_arn,
+            "qualifier": "DEFAULT",
+            "payload": json.dumps({"prompt": query}),
+        }
+
+        # Propagate session ID for trace coherence
+        session_id = getattr(_session_context, "session_id", None)
+        if session_id:
+            invoke_kwargs["runtimeSessionId"] = session_id
+            logger.info(f"A2A_SESSION_PROPAGATE | agent={agent_name} | session_id={session_id}")
+
+        response = agentcore_client.invoke_agent_runtime(**invoke_kwargs)
 
         # Handle streaming response (text/event-stream)
         if "text/event-stream" in response.get("contentType", ""):
@@ -199,9 +214,16 @@ def create_orchestrator_agent() -> Agent:
 
 
 @app.entrypoint
-async def invoke(payload=None):
+async def invoke(payload=None, context=None):
     """Main entrypoint for orchestrator agent"""
     try:
+        # Capture session ID for propagation to downstream A2A calls
+        if context and hasattr(context, "session_id"):
+            _session_context.session_id = context.session_id
+            logger.info(f"SESSION_START | session_id={context.session_id}")
+        else:
+            _session_context.session_id = None
+
         # Get the query from payload
         query = (
             payload.get("prompt", "Hello, how are you?")

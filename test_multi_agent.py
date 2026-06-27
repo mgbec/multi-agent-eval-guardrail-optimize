@@ -101,8 +101,11 @@ def test_agent(client, agent_arn, agent_name, prompt):
     spinner.start()
 
     try:
+        import uuid
+        session_id = f"test-{uuid.uuid4()}"
         response = client.invoke_agent_runtime(
             agentRuntimeArn=agent_arn,
+            runtimeSessionId=session_id,
             qualifier="DEFAULT",
             payload=json.dumps({"prompt": prompt}),
         )
