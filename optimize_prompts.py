@@ -203,6 +203,7 @@ def request_system_prompt_recommendation(client, agent_name, days, evaluator_id)
     service_name = get_service_name(agent_name)
     current_prompt = PROMPTS[agent_name]
     now = datetime.now(timezone.utc)
+    account_id = get_account_id()
 
     print(f"  Agent: {agent_name}")
     print(f"  Log group: {log_group_arn.split(':log-group:')[1]}")
@@ -212,17 +213,26 @@ def request_system_prompt_recommendation(client, agent_name, days, evaluator_id)
     print(f"  Current prompt length: {len(current_prompt)} chars")
     print()
 
+    evaluator_arn = f"arn:aws:bedrock-agentcore:::evaluator/{evaluator_id}"
+
     try:
         response = client.start_recommendation(
-            recommendationType="SYSTEM_PROMPT",
-            evaluatorId=evaluator_id,
-            systemPrompt={"text": current_prompt},
-            agentTraces={
-                "cloudwatchLogs": {
-                    "logGroupArns": [log_group_arn],
-                    "serviceNames": [service_name],
-                    "startTime": now - timedelta(days=days),
-                    "endTime": now,
+            name=f"{agent_name}-prompt-opt-{int(now.timestamp())}",
+            type="SYSTEM_PROMPT_RECOMMENDATION",
+            recommendationConfig={
+                "systemPromptRecommendationConfig": {
+                    "systemPrompt": {"text": current_prompt},
+                    "agentTraces": {
+                        "cloudwatchLogs": {
+                            "logGroupArns": [log_group_arn],
+                            "serviceNames": [service_name],
+                            "startTime": now - timedelta(days=days),
+                            "endTime": now,
+                        }
+                    },
+                    "evaluationConfig": {
+                        "evaluators": [{"evaluatorArn": evaluator_arn}]
+                    },
                 }
             },
         )
@@ -248,19 +258,25 @@ def request_tool_description_recommendation(client, days, evaluator_id):
     print(f"  Tools: {[t['toolName'] for t in TOOL_DESCRIPTIONS]}")
     print()
 
+    evaluator_arn = f"arn:aws:bedrock-agentcore:::evaluator/{evaluator_id}"
+
     try:
         response = client.start_recommendation(
-            recommendationType="TOOL_DESCRIPTION",
-            evaluatorId=evaluator_id,
-            toolDescription={
-                "toolDescriptionText": {"tools": TOOL_DESCRIPTIONS}
-            },
-            agentTraces={
-                "cloudwatchLogs": {
-                    "logGroupArns": [log_group_arn],
-                    "serviceNames": [service_name],
-                    "startTime": now - timedelta(days=days),
-                    "endTime": now,
+            name=f"tools-opt-{int(now.timestamp())}",
+            type="TOOL_DESCRIPTION_RECOMMENDATION",
+            recommendationConfig={
+                "toolDescriptionRecommendationConfig": {
+                    "toolDescription": {
+                        "toolDescriptionText": {"tools": TOOL_DESCRIPTIONS}
+                    },
+                    "agentTraces": {
+                        "cloudwatchLogs": {
+                            "logGroupArns": [log_group_arn],
+                            "serviceNames": [service_name],
+                            "startTime": now - timedelta(days=days),
+                            "endTime": now,
+                        }
+                    },
                 }
             },
         )
@@ -278,7 +294,7 @@ def poll_recommendation(client, recommendation_id, max_wait=300):
         try:
             response = client.get_recommendation(recommendationId=recommendation_id)
             status = response.get("status", "UNKNOWN")
-            if status in ("COMPLETED", "FAILED"):
+            if status in ("COMPLETED", "FAILED", "SUCCEEDED"):
                 return response
             elapsed = int(time.time() - start)
             print(f"\r  Status: {status} ({elapsed}s)...", end="", flush=True)
@@ -348,21 +364,43 @@ def main():
         status = result.get("status", "UNKNOWN")
         print(f"  Status: {status}")
 
-        if status == "COMPLETED":
-            # Extract the recommended prompt/descriptions
-            recommended = result.get("recommendedConfiguration", {})
-            explanation = result.get("explanation", "No explanation provided")
+        if status in ("COMPLETED", "SUCCEEDED"):
+            rec_result = result.get("recommendationResult", {})
 
-            print(f"\n  Explanation:")
-            print(f"  {explanation[:500]}")
+            # System prompt recommendation
+            sp_result = rec_result.get("systemPromptRecommendationResult", {})
+            if sp_result:
+                recommended_prompt = sp_result.get("recommendedSystemPrompt", "")
+                error_msg = sp_result.get("errorMessage", "")
+                if recommended_prompt:
+                    print(f"\n  Recommended prompt ({len(recommended_prompt)} chars):")
+                    print(f"  {'─' * 50}")
+                    # Show first 500 chars
+                    print(f"  {recommended_prompt[:500]}")
+                    if len(recommended_prompt) > 500:
+                        print(f"  ... [{len(recommended_prompt) - 500} more chars in output file]")
+                elif error_msg:
+                    print(f"  Error: {error_msg}")
 
-            if recommended:
-                print(f"\n  Recommended configuration saved to: {args.output}")
-                print(f"  Review the changes before applying.")
+            # Tool description recommendation
+            td_result = rec_result.get("toolDescriptionRecommendationResult", {})
+            if td_result:
+                tools = td_result.get("tools", [])
+                error_msg = td_result.get("errorMessage", "")
+                if tools:
+                    print(f"\n  Recommended tool descriptions ({len(tools)} tools):")
+                    for tool in tools:
+                        print(f"    {tool.get('toolName', 'unknown')}: {str(tool.get('toolDescription', ''))[:100]}")
+                elif error_msg:
+                    print(f"  Error: {error_msg}")
+
+            print(f"\n  Full result saved to: {args.output}")
 
         elif status == "FAILED":
-            error = result.get("failureReason", "Unknown error")
-            print(f"  Failure: {error}")
+            rec_result = result.get("recommendationResult", {})
+            sp_err = rec_result.get("systemPromptRecommendationResult", {}).get("errorMessage", "")
+            td_err = rec_result.get("toolDescriptionRecommendationResult", {}).get("errorMessage", "")
+            print(f"  Failure: {sp_err or td_err or 'Unknown error'}")
 
     print(f"\n{'=' * 60}\n")
 
