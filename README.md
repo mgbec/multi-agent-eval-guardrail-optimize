@@ -96,6 +96,38 @@ This makes it ideal for:
 - Interoperability with non-AWS agents implementing the same spec
 - Building a marketplace where agents from different vendors interact
 
+### Session Propagation (Trace Coherence)
+
+A critical aspect of multi-agent observability is **session propagation** — ensuring all agents in a single user request share the same session ID so traces, evaluations, and observability tools can see the full picture.
+
+**The problem without session propagation:**
+```
+User → Orchestrator (session: abc-123)
+         → Specialist (session: xyz-789)     ← Different session!
+         → Fact Checker (session: def-456)   ← Different session!
+         → Critic (session: ghi-012)         ← Different session!
+```
+Each agent gets its own random session ID. Evaluators like `GoalSuccessRate` can't reconstruct the full conversation because they only see one agent's session at a time. Observability dashboards show 4 separate sessions instead of 1 coordinated request.
+
+**The solution — propagate the session ID:**
+```
+User → Orchestrator (session: abc-123)
+         → Specialist (session: abc-123)     ← Same session!
+         → Fact Checker (session: abc-123)   ← Same session!
+         → Critic (session: abc-123)         ← Same session!
+```
+
+**How it works in this project:**
+1. The caller passes `runtimeSessionId` when invoking the Orchestrator
+2. The Orchestrator's entrypoint captures it via `context.session_id`
+3. When the Orchestrator calls downstream agents, it passes that same session ID via `runtimeSessionId`
+4. All spans across all agents share the same `session.id` attribute
+
+This enables:
+- AgentCore evaluators to score the full multi-agent conversation as one session
+- The GenAI Observability dashboard to show the complete request flow
+- The optimization service to analyze full multi-hop traces
+
 ## What's Included
 
 This Terraform configuration creates:
