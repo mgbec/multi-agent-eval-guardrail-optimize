@@ -683,6 +683,16 @@ python eval_goal_attainment.py --days 7 --all-recent
 - Agent must have been invoked with traces recorded
 - Spans take ~30 seconds to propagate to CloudWatch after invocation
 
+### Known Limitation: Multi-Agent Evaluation Coherence
+
+> **Important:** AgentCore's built-in evaluators have a known limitation with multi-agent architectures. When the Orchestrator calls downstream agents (Specialist, Fact Checker, Critic), each agent runs in a separate AgentCore Runtime with its own session ID. The Evaluate API requires all spans to belong to a single session, which conflicts with multi-runtime architectures.
+>
+> **Impact:** Evaluators like `GoalSuccessRate` and `ToolSelectionAccuracy` may return "Session span data is incomplete" errors because they can't see the downstream agent's response data within the Orchestrator's session.
+>
+> **Workaround in this project:** The `eval_goal_attainment.py` script collects spans by trace ID (shared across all agents via OTEL), unifies them under one session ID, and includes log events from all agent runtime log groups. This enables `Builtin.Helpfulness` to work on most traces but other evaluators may still report incomplete data.
+>
+> **Root cause:** AgentCore conflates session routing (sticky microVM assignment) with session observability (trace grouping). Passing `runtimeSessionId` to downstream agents creates routing deadlocks, while not passing it creates evaluation gaps. This is a platform limitation, not an implementation error.
+
 ## Optimization
 
 AgentCore Optimization uses AI to improve your agent's prompts and tool descriptions based on real trace data.
