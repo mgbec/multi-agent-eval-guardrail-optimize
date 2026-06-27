@@ -106,59 +106,71 @@ def query_logs(logs_client, log_group_name, query_string, minutes_back=120):
 
 def get_recent_session_ids(logs_client, log_group, limit=5, minutes_back=120):
     """Get the most recent session IDs from traces."""
-    # Try aws/spans first (platform spans have session.id as a top-level attribute)
-    query = f"""fields @timestamp, `session.id` as session_id
-    | filter ispresent(`session.id`)
-    | stats max(@timestamp) as last_seen by session_id
-    | sort last_seen desc
-    | limit {limit}"""
+    # aws/spans stores spans as JSON in @message. Session ID is inside the JSON.
+    query = f"""fields @timestamp, @message
+    | filter @message like /session.id/
+    | sort @timestamp desc
+    | limit 200"""
 
     results = query_logs(logs_client, "aws/spans", query, minutes_back=minutes_back)
-    sessions = []
+
+    # Extract session IDs from the raw JSON messages
+    import re
+    session_ids = set()
     for row in results:
         for field in row:
-            if field["field"] == "session_id" and field["value"]:
-                sessions.append(field["value"])
+            if field["field"] == "@message":
+                # Look for session.id in the JSON
+                matches = re.findall(r'"session\.id"\s*:\s*"([^"]+)"', field["value"])
+                for m in matches:
+                    session_ids.add(m)
+
+    # Return most recent (deduplicated)
+    sessions = list(session_ids)[:limit]
 
     if sessions:
         return sessions
 
-    # Fall back to runtime log group (OTEL structured logs)
-    query2 = f"""fields @timestamp, attributes.`session.id` as session_id
-    | filter ispresent(attributes.`session.id`)
-    | stats max(@timestamp) as last_seen by session_id
-    | sort last_seen desc
-    | limit {limit}"""
+    # Fall back: check runtime log group for session IDs in OTEL logs
+    query2 = f"""fields @message
+    | filter @message like /session.id/
+    | sort @timestamp desc
+    | limit 100"""
 
     results = query_logs(logs_client, log_group, query2, minutes_back=minutes_back)
     for row in results:
         for field in row:
-            if field["field"] == "session_id" and field["value"]:
-                sessions.append(field["value"])
+            if field["field"] == "@message":
+                matches = re.findall(r'"session\.id"\s*:\s*"([^"]+)"', field["value"])
+                for m in matches:
+                    session_ids.add(m)
 
-    return sessions
+    return list(session_ids)[:limit]
 
 
 def collect_session_spans(logs_client, log_group, session_id, minutes_back=120):
     """Collect all span logs for a given session."""
-    # Query the agent runtime logs
-    query = f"""fields @timestamp, @message
-    | filter ispresent(scope.name) and ispresent(attributes.`session.id`)
-    | filter attributes.`session.id` = "{session_id}"
-    | sort @timestamp asc"""
+    import re
 
-    runtime_results = query_logs(logs_client, log_group, query, minutes_back=minutes_back)
-
-    # Also query aws/spans
-    aws_spans_query = f"""fields @timestamp, @message
-    | filter `session.id` = "{session_id}" or attributes.`session.id` = "{session_id}"
-    | sort @timestamp asc"""
+    # Query aws/spans for this session (session ID is inside JSON message)
+    aws_spans_query = f"""fields @message
+    | filter @message like "{session_id}"
+    | sort @timestamp asc
+    | limit 1000"""
 
     aws_span_results = query_logs(logs_client, "aws/spans", aws_spans_query, minutes_back=minutes_back)
 
+    # Also query the runtime log group
+    runtime_query = f"""fields @message
+    | filter @message like "{session_id}"
+    | sort @timestamp asc
+    | limit 1000"""
+
+    runtime_results = query_logs(logs_client, log_group, runtime_query, minutes_back=minutes_back)
+
     # Extract JSON messages
     spans = []
-    for results in [runtime_results, aws_span_results]:
+    for results in [aws_span_results, runtime_results]:
         for row in results:
             for field in row:
                 if field["field"] == "@message" and field["value"].strip().startswith("{"):
