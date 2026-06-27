@@ -131,8 +131,8 @@ def get_recent_trace_ids(logs_client, log_group, limit=5, minutes_back=120):
 
 
 def collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=120):
-    """Collect ALL spans for a trace ID across all log groups.
-    This captures the full multi-agent interaction regardless of session boundaries."""
+    """Collect ALL spans AND log events for a trace ID across all log groups.
+    This captures the full multi-agent interaction including conversation content."""
     import re
 
     all_spans = []
@@ -152,11 +152,11 @@ def collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=120
                 except json.JSONDecodeError:
                     pass
 
-    # Also search the orchestrator's runtime log group
+    # Search the orchestrator's runtime log group (contains Strands log events with conversation content)
     runtime_query = f"""fields @message
     | filter @message like "{trace_id}"
     | sort @timestamp asc
-    | limit 500"""
+    | limit 1000"""
 
     runtime_results = query_logs(logs_client, log_group, runtime_query, minutes_back=minutes_back)
     for row in runtime_results:
@@ -167,16 +167,42 @@ def collect_spans_by_trace_id(logs_client, log_group, trace_id, minutes_back=120
                 except json.JSONDecodeError:
                     pass
 
-    # Deduplicate by spanId
-    seen_span_ids = set()
+    # Also search ALL agent runtime log groups for this trace
+    # (downstream agents emit log events with conversation content too)
+    agent_log_prefixes = [
+        "/aws/bedrock-agentcore/runtimes/agentcore_multi_agent_SpecialistAgent",
+        "/aws/bedrock-agentcore/runtimes/agentcore_multi_agent_FactCheckerAgent",
+        "/aws/bedrock-agentcore/runtimes/agentcore_multi_agent_CriticAgent",
+    ]
+
+    for prefix in agent_log_prefixes:
+        try:
+            response = logs_client.describe_log_groups(logGroupNamePrefix=prefix)
+            groups = response.get("logGroups", [])
+            if groups:
+                latest_group = sorted(groups, key=lambda g: g.get("creationTime", 0), reverse=True)[0]["logGroupName"]
+                agent_results = query_logs(logs_client, latest_group, runtime_query, minutes_back=minutes_back)
+                for row in agent_results:
+                    for field in row:
+                        if field["field"] == "@message" and field["value"].strip().startswith("{"):
+                            try:
+                                all_spans.append(json.loads(field["value"]))
+                            except json.JSONDecodeError:
+                                pass
+        except Exception:
+            pass  # Skip if log group doesn't exist
+
+    # Deduplicate by spanId (but keep log events which may share spanId with their parent span)
+    seen = set()
     unique_spans = []
     for span in all_spans:
+        # Create a unique key from spanId + body content (to keep both spans and their log events)
         span_id = span.get("spanId", "")
-        if span_id and span_id not in seen_span_ids:
-            seen_span_ids.add(span_id)
+        has_body = "body" in span and isinstance(span.get("body"), dict)
+        key = f"{span_id}:{has_body}:{span.get('timeUnixNano', '')}"
+        if key not in seen:
+            seen.add(key)
             unique_spans.append(span)
-        elif not span_id:
-            unique_spans.append(span)  # Keep spans without IDs (log events)
 
     return unique_spans
 
