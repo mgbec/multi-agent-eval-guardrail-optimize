@@ -106,18 +106,36 @@ def query_logs(logs_client, log_group_name, query_string, minutes_back=120):
 
 def get_recent_session_ids(logs_client, log_group, limit=5, minutes_back=120):
     """Get the most recent session IDs from traces."""
-    query = f"""fields @timestamp, attributes.`session.id` as session_id
-    | filter ispresent(attributes.`session.id`)
+    # Try aws/spans first (platform spans have session.id as a top-level attribute)
+    query = f"""fields @timestamp, `session.id` as session_id
+    | filter ispresent(`session.id`)
     | stats max(@timestamp) as last_seen by session_id
     | sort last_seen desc
     | limit {limit}"""
 
-    results = query_logs(logs_client, log_group, query, minutes_back=minutes_back)
+    results = query_logs(logs_client, "aws/spans", query, minutes_back=minutes_back)
     sessions = []
     for row in results:
         for field in row:
             if field["field"] == "session_id" and field["value"]:
                 sessions.append(field["value"])
+
+    if sessions:
+        return sessions
+
+    # Fall back to runtime log group (OTEL structured logs)
+    query2 = f"""fields @timestamp, attributes.`session.id` as session_id
+    | filter ispresent(attributes.`session.id`)
+    | stats max(@timestamp) as last_seen by session_id
+    | sort last_seen desc
+    | limit {limit}"""
+
+    results = query_logs(logs_client, log_group, query2, minutes_back=minutes_back)
+    for row in results:
+        for field in row:
+            if field["field"] == "session_id" and field["value"]:
+                sessions.append(field["value"])
+
     return sessions
 
 

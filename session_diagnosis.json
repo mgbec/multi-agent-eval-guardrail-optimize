@@ -1,0 +1,80 @@
+{
+  "diagnosed_at": "2026-06-27T14:57:57.685278+00:00",
+  "total_failed": 10,
+  "by_agent": {
+    "Specialist": 1,
+    "Orchestrator": 9
+  },
+  "sessions": [
+    {
+      "session_id": "c3343e77-4e3c-48cb-a93a-87ad03643981",
+      "agent": "Specialist",
+      "service": "specialist-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "864dc2ce-7287-40bc-aa5b-dc28046661b2",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "8ce11254-555b-448b-9110-cc6c87472b43",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "177e3545-b0da-4284-929f-12c298ad3d74",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "509b23c1-43c6-49e1-94f0-d10592bd865e",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "4fdcbecb-92b7-46e0-bca0-c208854f2462",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "0f9f3b9d-54c1-4c58-a7f3-31a33ddc5612",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "12e56297-25d5-4a3a-bcf1-e284511e682b",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "a403075e-f703-4920-b18f-c91b7ad7c772",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    },
+    {
+      "session_id": "e32d0493-6ddf-4b18-9661-e4eb8c656289",
+      "agent": "Orchestrator",
+      "service": "orchestrator-agent",
+      "has_input": true,
+      "has_output": true
+    }
+  ]
+}
