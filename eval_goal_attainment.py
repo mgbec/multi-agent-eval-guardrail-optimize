@@ -306,12 +306,23 @@ def evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes
         orchestrator_session = max(sessions, key=lambda k: len(sessions[k]))
         orchestrator_spans = sessions[orchestrator_session]
 
-    print(f"\n  Evaluating Orchestrator session: {orchestrator_session[:20]}... ({len(orchestrator_spans)} spans)")
+    # Include ALL spans but rewrite their session.id to match the Orchestrator's session.
+    # This gives the evaluator the complete picture (including downstream agent responses)
+    # while satisfying the single-session requirement.
+    unified_spans = []
+    for span in all_spans:
+        span_copy = json.loads(json.dumps(span))  # Deep copy
+        # Overwrite session.id in attributes
+        if "attributes" in span_copy and isinstance(span_copy["attributes"], dict):
+            span_copy["attributes"]["session.id"] = orchestrator_session
+        unified_spans.append(span_copy)
+
+    print(f"\n  Evaluating with {len(unified_spans)} unified spans (session: {orchestrator_session[:20]}...)")
 
     all_results = []
     for evaluator_id in EVALUATORS:
         print(f"  Running {evaluator_id}...", end=" ")
-        results = run_evaluation(agentcore_client, evaluator_id, orchestrator_spans)
+        results = run_evaluation(agentcore_client, evaluator_id, unified_spans)
         for r in results:
             r["evaluator_used"] = evaluator_id
         all_results.extend(results)
@@ -325,7 +336,7 @@ def evaluate_session(agentcore_client, logs_client, log_group, trace_id, minutes
             else:
                 print("Done")
 
-    return {"trace_id": trace_id, "span_count": len(orchestrator_spans), "total_spans": len(all_spans), "results": all_results}
+    return {"trace_id": trace_id, "span_count": len(unified_spans), "total_spans": len(all_spans), "results": all_results}
 
 
 # ============================================================================
