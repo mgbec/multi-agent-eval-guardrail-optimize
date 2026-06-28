@@ -691,7 +691,7 @@ python eval_goal_attainment.py --days 7 --all-recent
 >
 > **Workaround in this project:** The `eval_goal_attainment.py` script collects spans by trace ID (shared across all agents via OTEL), unifies them under one session ID, and includes log events from all agent runtime log groups. This enables `Builtin.Helpfulness` to work on most traces but other evaluators may still report incomplete data.
 >
-> **Root cause:** AgentCore conflates session routing (sticky microVM assignment) with session observability (trace grouping). Passing `runtimeSessionId` to downstream agents creates routing deadlocks, while not passing it creates evaluation gaps. This is a platform limitation, not an implementation error.
+> **Root cause:** AgentCore uses runtimeSessionId for session routing (sticky microVM assignment) and, also session observability (trace grouping). Passing `runtimeSessionId` to downstream agents creates routing deadlocks, while not passing it creates evaluation gaps. 
 
 ## Optimization
 
