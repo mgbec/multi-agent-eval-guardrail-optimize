@@ -581,7 +581,11 @@ This project includes full distributed tracing via ADOT (AWS Distro for OpenTele
 
 ### Distributed Tracing (ADOT)
 
-All agents are auto-instrumented with OpenTelemetry. Traces flow to the `aws/spans` CloudWatch log group and include:
+All agents are auto-instrumented with OpenTelemetry via ADOT (`opentelemetry-instrument` in the Dockerfile CMD). Traces and log events are written to each agent's CloudWatch runtime log group automatically.
+
+**Note:** For spans to also appear in the `aws/spans` log group (used by AgentCore's GenAI Observability dashboard), tracing must be enabled per-runtime in the AgentCore console. This is a one-time toggle per runtime and resets when runtimes are recreated.
+
+Traces include:
 
 - **Agent spans**: Full invocation lifecycle per agent
 - **LLM call spans**: Model ID, token usage (input/output), time-to-first-token
@@ -659,15 +663,17 @@ python eval_goal_attainment.py --days 7 --all-recent
 | Evaluator | What it measures | Level |
 |-----------|-----------------|-------|
 | `Builtin.Helpfulness` | Was the response useful to the user? | Trace |
-| `Builtin.GoalSuccessRate` | Did the agent achieve the user's stated goal? | Trace |
+| `Builtin.GoalSuccessRate` | Did the agent achieve the user's stated goal? | Session |
 | `Builtin.ToolSelectionAccuracy` | Were the right tools (agents) selected? | Tool call |
 
 ### How It Works
 
-1. The script collects span logs from CloudWatch (agent runtime logs + `aws/spans`)
-2. Passes them to AgentCore's `Evaluate` API with each built-in evaluator
-3. Each evaluator uses an LLM-as-a-judge to score the session
-4. Results include a numeric score, label, and explanation
+1. The script finds recent trace IDs from the Orchestrator's log group
+2. Collects ALL spans and log events for that trace across all agent runtime log groups (Orchestrator, Specialist, Fact Checker, Critic) plus `aws/spans`
+3. Unifies all spans under a single session ID (required by the Evaluate API)
+4. Passes them to AgentCore's `Evaluate` API with each built-in evaluator
+5. Each evaluator uses an LLM-as-a-judge to score the trace
+6. Results include a numeric score, label, and explanation
 
 ### Evaluations vs. Live Critic
 
