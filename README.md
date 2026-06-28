@@ -1,4 +1,4 @@
-# Multi-Agent Runtime on Amazon Bedrock AgentCore (Terraform)
+# Multi-Agent Runtime on Bedrock AgentCore using Terraform
 
 This Terraform module deploys a multi-agent system using Amazon Bedrock AgentCore Runtime with enhanced observability.
 
@@ -124,9 +124,11 @@ User → Orchestrator (session: abc-123)
 4. All spans across all agents share the same `session.id` attribute
 
 This enables:
-- AgentCore evaluators to score the full multi-agent conversation as one session
-- The GenAI Observability dashboard to show the complete request flow
-- The optimization service to analyze full multi-hop traces
+- The GenAI Observability dashboard to correlate related agent calls via shared trace IDs
+- Application logs to show the parent session for each downstream agent invocation
+- Manual trace analysis across agent boundaries using `A2A_SESSION_CONTEXT` log entries
+
+> **Note:** Due to a platform limitation, AgentCore evaluators and the optimization service cannot automatically score multi-agent sessions as a single unit. See [Known Limitation](#known-limitation-multi-agent-evaluation-coherence) for details and workarounds.
 
 ## What's Included
 
