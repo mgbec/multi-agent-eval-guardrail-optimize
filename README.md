@@ -695,6 +695,22 @@ python eval_goal_attainment.py --days 7 --all-recent
 
 ## Optimization
 
+> **Current Status: Blocked by Evaluation Limitation**
+>
+> The Optimization (Recommendations) API requires evaluating traces server-side before generating prompt improvements. Due to the multi-agent session coherence issue described above, the server-side evaluator fails on most sessions with "sessions could not be evaluated" errors.
+>
+> **What works:**
+> - `optimize_prompts.py` successfully submits recommendation requests
+> - The API finds traces and attempts evaluation
+> - Simple single-agent sessions (no A2A hops) can be evaluated and optimized
+>
+> **What doesn't work:**
+> - Multi-agent sessions (Orchestrator → Specialist/Fact Checker/Critic) fail server-side evaluation
+> - The Recommendations API uses `cloudwatchLogs` for server-side span discovery, which cannot be overridden with our client-side trace-ID-based collection workaround
+> - Unlike on-demand evaluations (where we collect and unify spans ourselves), the optimization service does its own span discovery and hits the same session boundary problem
+>
+> **Workaround:** Run optimizations with `--days 1` after generating several simple queries (that don't trigger A2A calls). The 8-10 sessions that CAN be evaluated may be enough for the service to generate a recommendation. Alternatively, wait for AWS to add trace-ID-based session linking in the optimization service.
+
 AgentCore Optimization uses AI to improve your agent's prompts and tool descriptions based on real trace data.
 
 ### How It Works
