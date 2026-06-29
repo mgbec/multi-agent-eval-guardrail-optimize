@@ -693,13 +693,22 @@ python eval_goal_attainment.py --days 7 --all-recent
 
 ### Known Limitation: Multi-Agent Evaluation Coherence
 
-> **Important:** AgentCore's built-in evaluators have a known limitation with multi-agent architectures. When the Orchestrator calls downstream agents (Specialist, Fact Checker, Critic), each agent runs in a separate AgentCore Runtime with its own session ID. The Evaluate API requires all spans to belong to a single session, which conflicts with multi-runtime architectures.
+> **Important:** This project uses a **multi-runtime architecture** where each agent (Orchestrator, Specialist, Fact Checker, Critic) runs in its own AgentCore Runtime with its own isolated microVM and session. This architecture was chosen for independent scaling, fault isolation, and separate security boundaries.
 >
-> **Impact:** Evaluators like `GoalSuccessRate` and `ToolSelectionAccuracy` may return "Session span data is incomplete" errors because they can't see the downstream agent's response data within the Orchestrator's session.
+> However, AgentCore's evaluation and optimization services are designed around the **single-runtime model**, where all agents run in-process within one container and share a single session. In the single-runtime model, all spans and log events naturally belong to one session, and evaluators can reconstruct the full conversation seamlessly.
 >
-> **Workaround in this project:** The `eval_goal_attainment.py` script collects spans by trace ID (shared across all agents via OTEL), unifies them under one session ID, and includes log events from all agent runtime log groups. This enables `Builtin.Helpfulness` to work on most traces but other evaluators may still report incomplete data.
+> **The architectural mismatch:**
+> - Multi-runtime: each agent gets its own `session.id` → evaluators see fragmented sessions
+> - Single-runtime: all subagents share one `session.id` → evaluators see a complete conversation
 >
-> **Root cause:** AgentCore uses runtimeSessionId for session routing (sticky microVM assignment) and, also session observability (trace grouping). Passing `runtimeSessionId` to downstream agents creates routing deadlocks, while not passing it creates evaluation gaps. 
+> **Impact on this project:**
+> - Trace-level evaluators (`Builtin.Helpfulness`) work partially — they can score the Orchestrator's own output
+> - Session-level evaluators (`Builtin.GoalSuccessRate`) and tool-level evaluators (`Builtin.ToolSelectionAccuracy`) fail because they need complete data from downstream agents that exists in separate sessions
+> - The optimization service (Recommendations API) cannot evaluate multi-agent sessions server-side
+>
+> **Workaround:** The `eval_goal_attainment.py` script collects spans by trace ID (shared across all agents via OTEL propagation), unifies them under one session ID, and includes log events from all agent runtime log groups. This enables some evaluators to work but doesn't fully replicate the seamless experience of the single-runtime model.
+>
+> **Alternative architecture:** For projects where evaluations and optimization are the primary goal, consider the single-runtime model — run subagents as local Strands `Agent` instances within the Orchestrator's container. This trades independent scaling for full evaluation compatibility. 
 
 ## Optimization
 
